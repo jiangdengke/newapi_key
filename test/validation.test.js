@@ -1,0 +1,95 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  buildSequentialChannelNames,
+  normalizeKeys,
+  redactSensitiveText,
+  validateChannelDefaults,
+  validateImportInput,
+  ValidationError,
+} from "../lib/validation.js";
+
+test("normalizeKeys removes blank and duplicate entries", () => {
+  assert.deepEqual(
+    normalizeKeys("sk-first\n\nsk-second\nsk-first\n"),
+    ["sk-first", "sk-second"],
+  );
+});
+
+test("buildSequentialChannelNames continues after the highest existing sequence", () => {
+  const generatedNames = buildSequentialChannelNames({
+    existingNames: ["claude-0711-003", "claude-0711-106", "other-0711-999"],
+    keyCount: 3,
+    namePrefix: "claude",
+    dateSegment: "0711",
+    startNumber: 1,
+    continueFromExisting: true,
+  });
+
+  assert.deepEqual(generatedNames, [
+    "claude-0711-107",
+    "claude-0711-108",
+    "claude-0711-109",
+  ]);
+});
+
+test("validateImportInput rejects an invalid date segment", () => {
+  assert.throws(
+    () => validateImportInput({
+      keys: ["sk-example"],
+      namePrefix: "claude",
+      dateSegment: "711",
+      startNumber: 1,
+      group: "anthropic",
+    }),
+    (error) => error instanceof ValidationError && /4 位数字/.test(error.message),
+  );
+});
+
+test("validateChannelDefaults accepts fixed and automatic date modes", () => {
+  assert.deepEqual(
+    validateChannelDefaults({
+      group: "anthropic",
+      namePrefix: "claude",
+      startNumber: "12",
+      continueFromExisting: "false",
+      dateMode: "0711",
+    }),
+    {
+      group: "anthropic",
+      namePrefix: "claude",
+      startNumber: 12,
+      continueFromExisting: false,
+      dateMode: "0711",
+      dateSegment: "0711",
+    },
+  );
+
+  const automaticDefaults = validateChannelDefaults({ dateMode: "auto" });
+  assert.equal(automaticDefaults.dateMode, "auto");
+  assert.match(automaticDefaults.dateSegment, /^\d{4}$/);
+});
+
+test("validateChannelDefaults rejects invalid environment values", () => {
+  assert.throws(
+    () => validateChannelDefaults({ continueFromExisting: "sometimes" }),
+    (error) => error instanceof ValidationError && /true 或 false/.test(error.message),
+  );
+  assert.throws(
+    () => validateChannelDefaults({ dateMode: "today" }),
+    (error) => error instanceof ValidationError && /auto 或 4 位日期段/.test(error.message),
+  );
+});
+
+test("redactSensitiveText removes explicit secrets and key-shaped values", () => {
+  const redactedText = redactSensitiveText(
+    "password-value rejected sk-ant-example12345678",
+    ["password-value"],
+  );
+
+  assert.equal(redactedText.includes("password-value"), false);
+  assert.equal(redactedText.includes("sk-ant-example12345678"), false);
+  assert.match(redactedText, /\[已隐藏\]/);
+  assert.match(redactedText, /sk-\*\*\*/);
+});
