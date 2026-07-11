@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { Writable } from "node:stream";
 import test from "node:test";
 
+import { createLogger } from "../lib/logger.js";
 import { createApplicationServer } from "../server.js";
 
 const MOCK_ADMIN_PASSWORD = "mock-admin-password";
@@ -33,6 +35,29 @@ function closeServer(server) {
       resolve();
     });
   });
+}
+
+function createLogCapture() {
+  let capturedOutput = "";
+  const output = new Writable({
+    write(chunk, encoding, callback) {
+      capturedOutput += chunk.toString();
+      callback();
+    },
+  });
+  return {
+    output,
+    getEntries() {
+      return capturedOutput
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((logLine) => JSON.parse(logLine));
+    },
+    getOutput() {
+      return capturedOutput;
+    },
+  };
 }
 
 async function readRequestJson(request) {
@@ -204,6 +229,12 @@ test("application imports channels with sequential names and safe feedback", asy
     requestMetrics,
   );
   const mockNewApiBaseUrl = await listenOnAvailablePort(mockNewApiServer);
+  const applicationLogCapture = createLogCapture();
+  const applicationLogger = createLogger({
+    level: "info",
+    output: applicationLogCapture.output,
+    errorOutput: applicationLogCapture.output,
+  });
   const applicationServer = createApplicationServer({
     newApiConnection: {
       baseUrl: mockNewApiBaseUrl,
@@ -218,6 +249,7 @@ test("application imports channels with sequential names and safe feedback", asy
       dateMode: "0711",
     },
     getCurrentTime: () => currentTime,
+    logger: applicationLogger,
   });
   const applicationBaseUrl = await listenOnAvailablePort(applicationServer);
 
@@ -225,6 +257,7 @@ test("application imports channels with sequential names and safe feedback", asy
     const pageResponse = await fetch(applicationBaseUrl);
     const pageHtml = await pageResponse.text();
     assert.equal(pageResponse.status, 200);
+    assert.match(pageResponse.headers.get("x-request-id"), /^[0-9a-f-]{36}$/);
     assert.match(pageHtml, /id="keys"/);
     assert.match(pageHtml, /id="target-new-api"/);
     assert.match(pageHtml, /当前 New API/);
@@ -487,6 +520,45 @@ test("application imports channels with sequential names and safe feedback", asy
     assert.equal(requestMetrics.channelListRequests, channelListRequestsBeforeSynchronization);
     assert.equal(requestMetrics.rateLimitedChannelListRequests, 0);
     assert.equal(requestMetrics.rateLimitedChannelSearchRequests, 0);
+
+    const applicationLogEntries = applicationLogCapture.getEntries();
+    assert.equal(
+      applicationLogEntries.some((logEntry) => (
+        logEntry.event === "http_request_completed"
+        && logEntry.path === "/api/import"
+        && logEntry.statusCode === 200
+      )),
+      true,
+    );
+    assert.equal(
+      applicationLogEntries.some((logEntry) => (
+        logEntry.event === "channel_import_completed"
+        && logEntry.total === 2
+        && logEntry.success === 1
+        && logEntry.failure === 1
+      )),
+      true,
+    );
+    assert.equal(
+      applicationLogEntries.some((logEntry) => (
+        logEntry.event === "channel_usage_sync_completed"
+        && logEntry.trackedCount === 1
+      )),
+      true,
+    );
+    assert.equal(
+      applicationLogEntries.some((logEntry) => (
+        logEntry.event === "new_api_rate_limited"
+        && logEntry.operation === "search_channel_by_name"
+      )),
+      true,
+    );
+
+    const serializedApplicationLogs = applicationLogCapture.getOutput();
+    assert.equal(serializedApplicationLogs.includes(MOCK_ADMIN_PASSWORD), false);
+    assert.equal(serializedApplicationLogs.includes(MOCK_KEYS[0]), false);
+    assert.equal(serializedApplicationLogs.includes(MOCK_KEYS[1]), false);
+    assert.equal(serializedApplicationLogs.includes("mock-session"), false);
   } finally {
     await Promise.all([
       closeServer(applicationServer),

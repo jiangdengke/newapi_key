@@ -303,3 +303,40 @@
 - `docs/usage.md`：说明多实例识别用途和连接配置安全边界。
 - `progress.md`：追加本轮实现、验证证据、文件清单与回滚点。
 - 回滚点：上一条 `2026-07-11 - Task: 按本地导入记录精确同步渠道用量`；由于目录不是 Git 仓库，需将上述文件恢复到该记录对应版本。
+
+## 2026-07-11 - Task: 增加部署日志与 Docker、Nginx 部署支持
+
+### What was done
+
+- 增加单行 JSON 结构化日志，覆盖服务启停、HTTP 请求、New API 请求与限流、渠道导入汇总和用量同步汇总，并为每个 HTTP 请求返回可关联日志的请求 ID。
+- 日志统一输出到标准输出和标准错误，不记录请求体、管理员密码、完整 Key、Key 指纹、Cookie 或认证请求头；增加敏感字段和 Key、Cookie 形态文本的日志脱敏。
+- 增加可配置监听地址和优雅停机处理；本地默认继续监听 `127.0.0.1`，Docker 容器内由 Compose 设置为 `0.0.0.0`。
+- 增加 Node.js Docker 镜像、Compose 服务、SQLite 命名卷和 Docker 日志轮转；宿主机端口仅绑定 `127.0.0.1`，防止绕过 Nginx 认证直接访问。
+- 增加 Nginx Basic Auth 反向代理示例，并补充 HTTPS、部署、升级、日志查看、数据库备份和多实例隔离说明。
+
+### Testing
+
+- `node --test "test/logger.test.js" && node --test "test/validation.test.js" && node --test "test/record-store.test.js" && node --test "test/server.test.js"`：通过；共 10 项测试，覆盖日志结构和脱敏、请求 ID、导入和同步日志事件，以及既有导入、分页、用量同步和配置校验行为。
+- `node --check "server.js" && node --check "lib/logger.js" && node --check "lib/new-api-client.js" && node --check "test/logger.test.js" && node --check "test/server.test.js"`：通过。
+- `docker compose config --quiet`：通过；Compose 配置可解析，应用端口只发布到宿主机 `127.0.0.1`。
+- `git diff --check`：通过；未发现空白错误。
+- 编辑器诊断：已检查本轮 JavaScript 文件，未发现诊断错误。
+- `docker build -t newapi-key-importer:test .`：未完成；Dockerfile 已进入基础镜像解析阶段，但访问 Docker Hub 认证服务时网络超时，未能拉取 `node:24-alpine`。部署前需在可访问 Docker Hub 的服务器重新执行镜像构建，不能将本次结果视为镜像已构建通过。
+- 未启动正式服务，未访问或修改真实 New API 数据。
+
+### Notes
+
+- `.env.example`：增加本地监听地址和日志级别配置，并修正渠道配置仍可在页面编辑的过期说明。
+- `.gitignore`：排除包含 SQLite 运维备份的 `backups/` 目录，避免敏感业务记录被误提交。
+- `.dockerignore`：排除环境凭据、本地数据、测试和开发文档，缩小镜像构建上下文。
+- `Dockerfile`：使用非 root Node.js 用户运行应用，并准备持久化数据目录。
+- `docker-compose.yml`：增加本地回环端口发布、SQLite 命名卷、宿主机访问映射、优雅停止和日志轮转。
+- `deploy/nginx/newapi-key.conf.example`：增加 Basic Auth、反向代理、批量请求大小和流式反馈配置示例。
+- `lib/logger.js`：增加结构化日志级别、JSON 输出和敏感信息递归脱敏。
+- `lib/new-api-client.js`：记录不含 URL 查询参数、请求体和认证头的 New API 操作结果、429 和网络错误。
+- `server.js`：增加请求 ID、HTTP/导入/同步日志、可配置监听地址和信号优雅停机。
+- `test/logger.test.js`：验证敏感字段、Key 形态文本和 Cookie 形态文本不会写入日志。
+- `test/server.test.js`：验证请求 ID、业务日志事件和真实导入流程日志不包含测试密码、Key 或 Session Cookie。
+- `docs/usage.md`：增加日志说明、Docker Compose、Nginx Basic Auth、HTTPS、备份和多实例部署步骤。
+- `progress.md`：追加本轮实现、验证证据、文件清单与回滚点。
+- 回滚点：提交 `c61e0a5`。在确认工作区没有需要保留的后续改动后，可执行 `git restore --source=c61e0a5 -- .env.example docs/usage.md lib/new-api-client.js server.js test/server.test.js progress.md && rm -rf .dockerignore Dockerfile docker-compose.yml deploy/nginx lib/logger.js test/logger.test.js` 回滚本轮文件。

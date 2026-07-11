@@ -20,7 +20,9 @@ cp .env.example .env
 NEW_API_BASE_URL=http://127.0.0.1:3000
 NEW_API_USERNAME=your-admin-username
 NEW_API_PASSWORD=your-admin-password
+HOST=127.0.0.1
 PORT=4173
+LOG_LEVEL=info
 CHANNEL_GROUP=anthropic
 CHANNEL_NAME_PREFIX=claude
 CHANNEL_START_NUMBER=1
@@ -42,6 +44,165 @@ http://127.0.0.1:4173
 ```
 
 如需使用其他端口，修改 `.env` 中的 `PORT` 后重启工具。
+
+## 查看运行日志
+
+服务将日志以单行 JSON 输出到标准输出和标准错误，不在项目目录中生成日志文件。每条 HTTP 请求会返回 `X-Request-Id`，并在日志中记录同一个 `requestId`，用于关联页面报错和服务端请求。
+
+主要日志事件包括：
+
+- `application_started`、`application_shutdown_started`、`application_stopped`：服务启动和停止。
+- `http_request_completed`：请求方法、路径、状态码和耗时。
+- `new_api_request_completed`、`new_api_rate_limited`、`new_api_request_failed`：New API 调用结果、429 和网络错误。
+- `channel_import_started`、`channel_import_completed`：导入总数、成功数、失败数和耗时。
+- `channel_usage_sync_completed`：本地记录数、同步数、缺失数和耗时。
+
+本地运行时直接查看 `npm start` 所在终端。Docker 部署时执行：
+
+```bash
+docker compose logs -f --tail=200 importer
+```
+
+`.env` 中的 `LOG_LEVEL` 支持 `debug`、`info`、`warn` 和 `error`，默认建议使用 `info`。日志不会记录请求体、管理员密码、完整 Key、Key 指纹、Cookie 或认证请求头。
+
+## Docker Compose 部署
+
+以下方案将应用端口只发布到服务器本机的 `127.0.0.1`，公网访问必须经过 Nginx。不要把 Compose 中的端口绑定改为 `0.0.0.0:4173:4173`，否则访问者可以绕过 Nginx Basic Auth。
+
+### 1. 准备项目和环境配置
+
+服务器需安装 Git、Docker Engine 和 Docker Compose 插件。然后执行：
+
+```bash
+git clone git@github.com:jiangdengke/newapi_key.git
+cd newapi_key
+cp .env.example .env
+chmod 600 .env
+```
+
+编辑 `.env`，至少填写：
+
+```dotenv
+NEW_API_BASE_URL=https://newapi.internal.example.com
+NEW_API_USERNAME=your-admin-username
+NEW_API_PASSWORD=your-admin-password
+CHANNEL_GROUP=anthropic
+CHANNEL_NAME_PREFIX=claude
+CHANNEL_START_NUMBER=1
+CHANNEL_CONTINUE_FROM_EXISTING=true
+CHANNEL_DATE_MODE=auto
+LOG_LEVEL=info
+```
+
+Compose 会强制容器内使用 `HOST=0.0.0.0`、`PORT=4173` 和 `/app/data/channel-records.sqlite`，无需修改模板中的本地监听配置。SQLite 保存在 Docker 命名卷中，重建容器不会删除记录。
+
+`NEW_API_BASE_URL` 必须从容器内部可访问：
+
+- New API 在远程或内网服务器：填写其可达的 HTTP/HTTPS 地址。
+- New API 在同一台 Docker 宿主机并已发布端口：使用 `http://host.docker.internal:3000`，不要使用 `127.0.0.1`；Compose 已配置 Linux 所需的 `host-gateway` 映射。
+- New API 与本工具位于同一个 Docker 网络：填写 New API 的服务名和容器端口，例如 `http://new-api:3000`，并先将两个 Compose 项目接入同一个外部网络。
+
+### 2. 构建并启动
+
+```bash
+docker compose up -d --build
+docker compose ps
+curl -fsS http://127.0.0.1:4173/ >/dev/null
+```
+
+应用只绑定宿主机回环地址。Compose 已为容器日志设置单文件 `10m`、最多 `5` 个文件的轮转，防止长期运行占满磁盘。
+
+常用运维命令：
+
+```bash
+# 查看日志
+docker compose logs -f --tail=200 importer
+
+# 重启
+docker compose restart importer
+
+# 更新代码并重建
+git pull --ff-only
+docker compose up -d --build
+
+# 停止但保留 SQLite 命名卷
+docker compose down
+```
+
+不要执行 `docker compose down -v`，该命令会删除 SQLite 命名卷和导入历史。
+
+升级前可在应用正常停止、SQLite 已关闭后复制数据库文件：
+
+```bash
+mkdir -p backups
+docker compose stop importer
+docker compose cp importer:/app/data/channel-records.sqlite \
+  "backups/channel-records-$(date +%Y%m%d-%H%M%S).sqlite"
+docker compose start importer
+```
+
+备份文件包含脱敏 Key、不可逆 Key 指纹、渠道 ID 和用量历史，应当按敏感业务数据限制访问。恢复前先停止容器，并保留当前数据库作为额外回滚点。
+
+## Nginx、Basic Auth 与 HTTPS
+
+仓库提供 `deploy/nginx/newapi-key.conf.example`。以下以 Ubuntu/Debian 和域名 `importer.example.com` 为例。
+
+### 1. 准备域名与软件
+
+先将域名的 DNS A/AAAA 记录指向服务器，并确保防火墙只向公网开放 SSH、80 和 443，不开放 4173。安装 Nginx、Basic Auth 工具和 Certbot：
+
+```bash
+sudo apt update
+sudo apt install -y nginx apache2-utils certbot python3-certbot-nginx
+```
+
+### 2. 创建访问账号
+
+```bash
+sudo htpasswd -c /etc/nginx/.htpasswd-newapi-key importer-admin
+sudo chown root:www-data /etc/nginx/.htpasswd-newapi-key
+sudo chmod 640 /etc/nginx/.htpasswd-newapi-key
+```
+
+命令会交互式要求设置网页访问密码。该密码与 New API 管理员密码应当不同，也不要把 `.htpasswd` 放入仓库。
+
+### 3. 启用反向代理
+
+复制示例配置，并将其中的 `importer.example.com` 替换成真实域名：
+
+```bash
+sudo cp deploy/nginx/newapi-key.conf.example /etc/nginx/sites-available/newapi-key
+sudo editor /etc/nginx/sites-available/newapi-key
+sudo ln -s /etc/nginx/sites-available/newapi-key /etc/nginx/sites-enabled/newapi-key
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+示例配置关闭代理缓冲，以便批量导入反馈实时返回；同时允许最大 10 MB 请求体，并将上游读取超时设置为 300 秒。
+
+### 4. 启用 HTTPS
+
+```bash
+sudo certbot --nginx -d importer.example.com
+sudo certbot renew --dry-run
+```
+
+Certbot 完成后，访问 `https://importer.example.com`，浏览器应先显示 Basic Auth 登录框，通过后才能进入导入页面。正式使用前同时确认：
+
+1. `http://服务器公网IP:4173` 无法从公网访问。
+2. 未输入 Basic Auth 凭据时域名返回 `401 Unauthorized`。
+3. HTTPS 证书有效，页面显示的目标 New API 地址正确。
+
+### 多实例部署
+
+每套实例使用独立项目目录、`.env`、Compose 项目名、宿主机回环端口和域名。例如第二套实例可在 `.env` 中增加：
+
+```dotenv
+COMPOSE_PROJECT_NAME=newapi-key-instance-2
+IMPORTER_HOST_PORT=4174
+```
+
+同时把对应 Nginx 配置的 `proxy_pass` 改为 `http://127.0.0.1:4174`。独立的 `COMPOSE_PROJECT_NAME` 可避免不同实例共用容器和 SQLite 命名卷，页面标题下的 New API 地址用于进一步确认目标实例。
 
 ## 导入 Claude 渠道
 

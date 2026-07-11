@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.DS_Store
+data
+backups
+docs
+test
+progress.md
+node_modules
+npm-debug.log*

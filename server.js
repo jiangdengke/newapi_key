@@ -1,10 +1,12 @@
 import { createReadStream } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { loadEnvFile } from "node:process";
 
 import { NewApiClient } from "./lib/new-api-client.js";
+import { createLogger } from "./lib/logger.js";
 import { ChannelRecordStore } from "./lib/record-store.js";
 import {
   buildSequentialChannelNames,
@@ -16,8 +18,9 @@ import {
   ValidationError,
 } from "./lib/validation.js";
 
-const SERVER_HOST = "127.0.0.1";
+const DEFAULT_SERVER_HOST = "127.0.0.1";
 const DEFAULT_SERVER_PORT = 4173;
+const APPLICATION_VERSION = "1.0.0";
 const MAXIMUM_REQUEST_BODY_BYTES = 9 * 1024 * 1024;
 const MAXIMUM_RECORD_QUERY_KEY_LENGTH = 16_384;
 const MAXIMUM_RECORD_PAGE_SIZE = 100;
@@ -135,6 +138,7 @@ async function handleConnectionTest(request, response, applicationContext) {
 }
 
 async function handleImport(request, response, applicationContext) {
+  const startedAt = Date.now();
   const requestBody = await readJsonBody(request);
   const { channelDefaults, connectionInput, recordStore } = applicationContext;
   const importInput = validateImportInput({
@@ -155,6 +159,12 @@ async function handleImport(request, response, applicationContext) {
   let completedCount = 0;
   let successCount = 0;
   let failureCount = 0;
+  let fatalFailure = false;
+
+  applicationContext.logger.info("channel_import_started", {
+    requestId: request.requestId,
+    total: importInput.keys.length,
+  });
 
   try {
     const { newApiClient } = applicationContext;
@@ -249,14 +259,29 @@ async function handleImport(request, response, applicationContext) {
       failure: failureCount,
     });
   } catch (error) {
+    fatalFailure = true;
+    const redactedMessage = redactSensitiveText(error?.message, sensitiveValues);
+    applicationContext.logger.error("channel_import_failed", {
+      requestId: request.requestId,
+      error: new Error(redactedMessage),
+    });
     writeProgressEvent(response, {
       type: "fatal",
-      message: redactSensitiveText(error?.message, sensitiveValues),
+      message: redactedMessage,
       completed: completedCount,
       success: successCount,
       failure: failureCount,
     });
   } finally {
+    applicationContext.logger.info("channel_import_completed", {
+      requestId: request.requestId,
+      total: importInput.keys.length,
+      completed: completedCount,
+      success: successCount,
+      failure: failureCount,
+      fatalFailure,
+      durationMilliseconds: Date.now() - startedAt,
+    });
     response.end();
   }
 }
@@ -304,6 +329,7 @@ async function handleQueryRecords(request, response, applicationContext) {
 }
 
 async function handleSynchronizeRecords(request, response, applicationContext) {
+  const startedAt = Date.now();
   await readJsonBody(request);
   const { connectionInput, newApiClient, recordStore } = applicationContext;
   const importedRecords = recordStore.listRecords(connectionInput.baseUrl);
@@ -319,6 +345,13 @@ async function handleSynchronizeRecords(request, response, applicationContext) {
         ...synchronization,
         records: [],
       },
+    });
+    applicationContext.logger.info("channel_usage_sync_completed", {
+      requestId: request.requestId,
+      trackedCount: 0,
+      synchronizedCount: synchronization.synchronizedCount,
+      missingCount: synchronization.missingCount,
+      durationMilliseconds: Date.now() - startedAt,
     });
     return;
   }
@@ -349,6 +382,13 @@ async function handleSynchronizeRecords(request, response, applicationContext) {
       records: recordStore.listRecords(connectionInput.baseUrl),
     },
   });
+  applicationContext.logger.info("channel_usage_sync_completed", {
+    requestId: request.requestId,
+    trackedCount: importedRecords.length,
+    synchronizedCount: synchronization.synchronizedCount,
+    missingCount: synchronization.missingCount,
+    durationMilliseconds: Date.now() - startedAt,
+  });
 }
 
 function serveStaticFile(response, staticFile) {
@@ -366,8 +406,11 @@ function serveStaticFile(response, staticFile) {
 
 async function handleRequest(request, response, applicationContext) {
   setSecurityHeaders(response);
-  const { connectionInput, channelDefaults } = applicationContext;
-  const requestUrl = new URL(request.url || "/", `http://${request.headers.host || SERVER_HOST}`);
+  const { connectionInput, channelDefaults, logger } = applicationContext;
+  const requestUrl = new URL(
+    request.url || "/",
+    `http://${request.headers.host || DEFAULT_SERVER_HOST}`,
+  );
 
   try {
     if (request.method === "POST" && requestUrl.pathname === "/api/test-connection") {
@@ -413,9 +456,20 @@ async function handleRequest(request, response, applicationContext) {
     const statusCode = error instanceof ValidationError || error instanceof RequestBodyError
       ? 400
       : 502;
+    const redactedMessage = redactSensitiveText(
+      error?.message,
+      [connectionInput.password],
+    );
     sendJson(response, statusCode, {
       success: false,
-      message: redactSensitiveText(error?.message, [connectionInput.password]),
+      message: redactedMessage,
+    });
+    logger.error("http_request_handler_failed", {
+      requestId: request.requestId,
+      method: request.method,
+      path: requestUrl.pathname,
+      statusCode,
+      error: new Error(redactedMessage),
     });
   }
 }
@@ -425,6 +479,7 @@ export function createApplicationServer({
   channelDefaults,
   databasePath = ":memory:",
   getCurrentTime = Date.now,
+  logger = createLogger(),
 } = {}) {
   const connectionInput = validateConnectionInput(newApiConnection);
   const normalizedChannelDefaults = validateChannelDefaults(channelDefaults);
@@ -433,7 +488,11 @@ export function createApplicationServer({
     connectionInput,
     channelDefaults: normalizedChannelDefaults,
     recordStore,
-    newApiClient: new NewApiClient({ baseUrl: connectionInput.baseUrl }),
+    logger,
+    newApiClient: new NewApiClient({
+      baseUrl: connectionInput.baseUrl,
+      logger,
+    }),
     authenticatedUser: null,
     authenticationPromise: null,
     systemStatusCache: {
@@ -443,7 +502,31 @@ export function createApplicationServer({
     getCurrentTime,
   };
   const server = createServer((request, response) => {
-    handleRequest(request, response, applicationContext).catch(() => {
+    const requestId = randomUUID();
+    const requestStartedAt = Date.now();
+    request.requestId = requestId;
+    response.setHeader("X-Request-Id", requestId);
+    response.once("finish", () => {
+      logger.info("http_request_completed", {
+        requestId,
+        method: request.method,
+        path: new URL(request.url || "/", "http://localhost").pathname,
+        statusCode: response.statusCode,
+        durationMilliseconds: Date.now() - requestStartedAt,
+      });
+    });
+
+    handleRequest(request, response, applicationContext).catch((error) => {
+      const redactedMessage = redactSensitiveText(
+        error?.message,
+        [connectionInput.password],
+      );
+      logger.error("http_request_unhandled_error", {
+        requestId,
+        method: request.method,
+        path: new URL(request.url || "/", "http://localhost").pathname,
+        error: new Error(redactedMessage),
+      });
       if (!response.headersSent) {
         sendJson(response, 500, { success: false, message: "服务处理请求失败" });
       } else {
@@ -488,8 +571,38 @@ const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === proce
 if (isMainModule) {
   const applicationConfiguration = loadApplicationConfigurationFromEnvironment();
   const configuredPort = Number(process.env.PORT || DEFAULT_SERVER_PORT);
-  const server = createApplicationServer(applicationConfiguration);
-  server.listen(configuredPort, SERVER_HOST, () => {
-    console.log(`New API Key 导入工具已启动：http://${SERVER_HOST}:${configuredPort}`);
+  const configuredHost = process.env.HOST || DEFAULT_SERVER_HOST;
+  const logger = createLogger();
+  const server = createApplicationServer({
+    ...applicationConfiguration,
+    logger,
   });
+  server.listen(configuredPort, configuredHost, () => {
+    logger.info("application_started", {
+      version: APPLICATION_VERSION,
+      host: configuredHost,
+      port: configuredPort,
+      newApiBaseUrl: applicationConfiguration.newApiConnection.baseUrl,
+    });
+  });
+
+  let shutdownStarted = false;
+  function shutDown(signal) {
+    if (shutdownStarted) {
+      return;
+    }
+    shutdownStarted = true;
+    logger.info("application_shutdown_started", { signal });
+    server.close((error) => {
+      if (error) {
+        logger.error("application_shutdown_failed", { signal, error });
+        process.exitCode = 1;
+      } else {
+        logger.info("application_stopped", { signal });
+      }
+    });
+  }
+
+  process.once("SIGTERM", () => shutDown("SIGTERM"));
+  process.once("SIGINT", () => shutDown("SIGINT"));
 }
