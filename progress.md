@@ -680,3 +680,27 @@
 - `app/globals.css`：删除不再使用的管理页标题栏样式，保留紧凑页面顶部间距。
 - `progress.md`：追加本轮界面精简和验证记录。
 - 回滚方式：在管理页顶部恢复标题栏和调用 `loadManagementData` 的刷新按钮，并恢复 `admin-title-row` 样式。
+
+## 2026-07-12 - Task: 增加项目 README 与公网部署说明
+
+### What was done
+
+- 在仓库根目录增加项目 README，集中说明多实例管理、访问 Key、渠道导入、SQLite 和安全边界。
+- 增加 Docker Compose 启动、健康检查、日志、数据卷保护和同宿主机 New API 连接说明。
+- 给出 `new.lsynb.me` 的 Nginx HTTP 反向代理配置，并保留 NDJSON 导入进度所需的关闭代理缓冲和长请求超时设置。
+- 增加 Certbot 自动申请证书、HTTP 跳转 HTTPS、Session Cookie 安全切换和证书续期验证步骤。
+- 补充本地 Node.js 启动、数据库备份和自动化验证入口。
+
+### Testing
+
+- `npm test`：通过；共 18 项测试。
+- `npm run build`：通过；Next.js 16.2.10 生产构建成功。
+- `docker compose config --quiet`：通过；README 中的默认监听端口与当前 Compose 配置一致。
+- `git diff --check`：通过，未发现空白错误。
+- 本轮只增加文档和进度记录，未访问 New API，也未修改 SQLite 数据。
+
+### Notes
+
+- `README.md`：新增项目介绍、配置、Docker Compose、Nginx、Certbot、备份、验证和安全说明。
+- `progress.md`：追加本轮文档交付和验证记录。
+- 回滚方式：删除根目录 `README.md`，并删除本轮 `progress.md` 追加内容；该回滚不影响应用代码、Docker 数据卷或 SQLite 数据。
