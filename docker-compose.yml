@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     environment:
-      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
       PORT: 4173
       DATABASE_PATH: /app/data/channel-records.sqlite
     ports:

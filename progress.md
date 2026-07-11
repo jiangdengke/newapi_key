@@ -340,3 +340,343 @@
 - `docs/usage.md`：增加日志说明、Docker Compose、Nginx Basic Auth、HTTPS、备份和多实例部署步骤。
 - `progress.md`：追加本轮实现、验证证据、文件清单与回滚点。
 - 回滚点：提交 `c61e0a5`。在确认工作区没有需要保留的后续改动后，可执行 `git restore --source=c61e0a5 -- .env.example docs/usage.md lib/new-api-client.js server.js test/server.test.js progress.md && rm -rf .dockerignore Dockerfile docker-compose.yml deploy/nginx lib/logger.js test/logger.test.js` 回滚本轮文件。
+
+## 2026-07-11 - Task: 迁移为 Next.js 多用户多实例管理系统
+
+### What was done
+
+- 将原生 Node.js HTTP 服务和静态页面迁移为 Next.js App Router 全栈应用，增加登录页、管理端和实例工作区。
+- 增加系统管理员与普通用户模型；普通用户固定绑定一个 New API 实例，服务端在每个实例接口上校验用户角色和实例归属。
+- 增加多 New API 实例管理、连接测试、启停控制、普通用户创建、实例改绑、密码重置和会话失效处理。
+- 使用 SQLite 保存系统用户、Session、实例配置和用户实例绑定；Session 仅保存随机令牌的 SHA-256 摘要，用户密码使用 scrypt 哈希。
+- 使用 AES-256-GCM 和环境主密钥加密 New API 管理员密码；完整渠道 Key 仍不写入 SQLite。
+- 增加旧版 SQLite 事务迁移：把原 `.env` 连接创建为初始实例，并将旧渠道记录按 New API 地址归属到该实例。
+- 保留逐 Key NDJSON 流式反馈、顺序命名、重复 Key 检测、完整 Key 精确查询、历史分页和按本地记录同步用量。
+- 增加每实例独立的 New API 会话、状态缓存和导入锁，避免实例间共享管理员 Cookie 或并发命名状态。
+- 将 Dockerfile 改为 Next.js standalone 多阶段构建，Compose 继续使用单容器和 SQLite 持久卷。
+- 删除旧 `server.js`、`public/`、旧存储层和 Nginx 示例；外部 TLS 与反向代理不再属于应用实现范围。
+- 增加 `docs/nextjs-usage.md`，说明初始化管理员、加密密钥、旧数据迁移、本地启动和容器部署。
+- 通过 npm override 将 Next.js 间接依赖 PostCSS 从有已知中危问题的 `8.4.31` 覆盖为 `8.5.16`。
+
+### Testing
+
+- `npm test`：通过；共 13 项测试，覆盖密码和凭据加密、旧数据库迁移、角色与实例授权、停用用户会话失效、停用实例访问、登录限流和 NDJSON 流式导入安全反馈。
+- `npm run build`：通过；Next.js 16.2.10 生产构建成功，全部页面和 Route Handler 完成编译与页面数据收集。
+- standalone 冒烟测试：使用临时内存 SQLite 和临时管理员启动 `.next/standalone/server.js`，登录成功且 Session Cookie 可访问 `/api/auth/me`；测试后已停止进程。
+- `docker compose config --quiet`：通过。
+- `git diff --check`：通过。
+- `npm audit --audit-level=moderate`：通过，报告 0 个漏洞。
+- `npm ls next postcss`：确认 Next.js 16.2.10 使用覆盖后的 PostCSS 8.5.16。
+- `docker build -t newapi-key-importer:next-test .`：未完成；访问 Docker Hub 认证端点获取 `node:24-alpine` 令牌时网络超时。Dockerfile 尚需在可访问 Docker Hub 的环境完成镜像构建验证。
+- 未访问真实 New API，也未创建或修改真实渠道。
+
+### Notes
+
+- 首次启动必须配置 `BOOTSTRAP_ADMIN_USERNAME`、`BOOTSTRAP_ADMIN_PASSWORD` 和 `CREDENTIAL_ENCRYPTION_KEY`。
+- 本地 HTTP 使用 `SESSION_COOKIE_SECURE=false`；浏览器通过 HTTPS 访问时应设为 `true`。
+- `CREDENTIAL_ENCRYPTION_KEY` 投入使用后必须稳定保存，更换密钥会导致 SQLite 中已加密的 New API 密码无法解密。
+- 本应用按单进程、单容器方式使用 SQLite，不支持多个应用副本同时挂载同一个数据库文件。
+- 回滚点：提交 `da5e11f`。本轮尚未提交；回滚前应先备份迁移后的 SQLite，因为旧版服务无法识别新增的用户、实例和会话数据结构。
+
+## 2026-07-11 - Task: 将环境配置模板注释改为中文
+
+### What was done
+
+- 将环境配置模板中的英文说明全部翻译为中文，保持变量名、示例值和配置行为不变。
+
+### Testing
+
+- 英文注释残留检查：通过；`.env.example` 中所有以 `#` 开头的说明均为中文。
+- `git diff --check`：通过；未发现空白错误。
+
+### Notes
+
+- `.env.example`：将初始化管理员、加密密钥、Session Cookie、渠道默认值、SQLite 路径和日志级别说明改为中文。
+- `progress.md`：追加本轮修改、验证证据和回滚方式。
+- 回滚方式：将 `.env.example` 的中文注释替换回本轮修改前的英文注释；变量和示例值无需调整。
+
+## 2026-07-11 - Task: 将 New API 环境变量改为可选迁移配置
+
+### What was done
+
+- 将 New API 连接和渠道默认值从环境配置模板的默认有效项移到旧版迁移区域，并默认注释。
+- 明确新部署应在系统管理端维护多个 New API 实例，只有迁移旧版单实例数据时才需要临时启用这些变量。
+
+### Testing
+
+- 配置模板检查：通过；默认有效配置中不再包含 `NEW_API_*` 或 `CHANNEL_*`，旧版迁移示例仍完整保留。
+- `git diff --check`：通过；未发现空白错误。
+
+### Notes
+
+- `.env.example`：调整配置顺序和默认启用状态，避免新部署误绑定一个固定 New API。
+- `progress.md`：追加本轮修改、验证证据和回滚方式。
+- 回滚方式：将模板底部的 `NEW_API_*` 和 `CHANNEL_*` 示例取消注释并移回文件开头。
+
+## 2026-07-11 - Task: 改为管理员与实例访问 Key 鉴权
+
+### What was done
+
+- 移除普通用户账号、普通用户 Session 和用户实例绑定模型，系统仅保留管理员账号登录。
+- 为每个 New API 实例增加独立访问 Key；完整值仅在生成时显示一次，SQLite 只保存 SHA-256 摘要、掩码、状态和版本。
+- 增加访客入口和实例绑定 Session；访客可导入 Anthropic Key、查看与精确查询历史、同步状态和用量，但不能访问管理端或其他实例。
+- 重新生成或停用访问 Key 时，在同一事务中撤销该实例全部访客 Session；停用实例也会撤销访客 Session。
+- 将 SQLite 升级到版本 2；旧多用户数据迁移时删除普通用户相关数据，保留管理员和渠道历史。无法直接归属的旧渠道按历史 New API 地址创建停用占位实例，不再要求固定环境变量才能启动。
+- 管理端增加访问 Key 生成、重新生成、一次性显示、复制和停用操作；默认入口改为访问 Key 验证，管理员登录作为独立入口。
+- 修正 Next.js standalone 的本地启动命令，并同步更新环境模板和使用文档。
+
+### Testing
+
+- `npm test`：通过；共 14 项测试，覆盖 v1 到 v2 数据迁移、旧用户清理、管理员 Session 保留、访问 Key 不明文落库、Key 重生成与停用撤销会话、访客跨实例隔离、管理端拒绝、访问 Key 登录和 NDJSON 导入。
+- `npm run build`：通过；Next.js 16.2.10 生产构建成功，页面与全部 Route Handler 完成编译。
+- standalone 冒烟测试：使用临时内存 SQLite 在 `127.0.0.1:4184` 启动 `.next/standalone/server.js`，未登录访问 `/api/auth/me` 返回 `401`；测试进程已停止。
+- `npm audit --audit-level=moderate`：通过，报告 0 个漏洞。
+- `docker compose config --quiet`：通过。
+- `git diff --check`：通过，未发现空白错误。
+- 编辑器诊断：已检查本轮应用、组件、数据层和测试文件，未发现诊断错误。
+- 未访问真实 New API，也未创建或修改真实渠道。
+
+### Notes
+
+- `lib/application-store.js`：新增 v2 SQLite 数据层、管理员与访客 Session、访问 Key 生命周期和旧数据占位实例迁移。
+- `lib/security.js`：增加高熵实例访问 Key 的生成、摘要和掩码工具，并支持解密空的占位实例密码。
+- `lib/auth.js`：将鉴权主体改为管理员或实例访客，并在服务端执行实例边界校验。
+- `lib/admin-validation.js`：增加实例访问 Key 输入校验，移除普通用户管理输入校验。
+- `lib/runtime-context.js`：切换到新数据层并增加访问 Key 登录失败计数。
+- `lib/client-api.js`：允许登录请求抑制全局会话过期事件，避免无效凭据被误判为已有会话失效。
+- `app/api/access/login/route.js`：增加访问 Key 登录、失败限流和实例绑定 Session 签发。
+- `app/api/admin/instances/[instanceId]/access-key/route.js`：增加管理员生成、重新生成和停用实例访问 Key 的接口。
+- `app/api/auth/login/route.js`：改为仅认证管理员并返回统一身份主体。
+- `app/api/auth/me/route.js`：返回管理员或访客身份主体。
+- `app/api/instances/route.js`：按身份主体返回可访问实例，并隐藏连接凭据和访问 Key 信息。
+- `app/api/instances/[instanceId]/config/route.js`：对访客隐藏管理员用户名和访问 Key 元数据。
+- `app/api/admin/users/route.js`、`app/api/admin/users/[userId]/route.js`：删除普通用户管理接口。
+- `components/access-gateway.js`：新增默认实例访问 Key 入口和管理员登录切换。
+- `components/application-client.js`：按管理员或访客身份进入管理端或唯一实例工作区。
+- `components/login-view.js`：改为管理员专用登录页。
+- `components/admin-dashboard.js`：移除普通用户管理，增加实例访问 Key 管理和一次性完整值展示。
+- `app/globals.css`：增加访问 Key 展示样式并删除普通用户界面的孤儿样式。
+- `test/application-store.test.js`：验证 v2 迁移、敏感值落盘和访问 Key 撤销语义。
+- `test/authorization.test.js`：验证访客实例隔离、管理端拒绝和访问 Key 登录。
+- `test/instance-route.test.js`：改为使用访客 Session 验证真实导入流程。
+- `test/security.test.js`：增加访问 Key 格式、随机性、摘要和掩码验证。
+- `test/system-store.test.js`：删除旧普通用户数据层测试，由 `test/application-store.test.js` 替代。
+- `package.json`：将生产启动命令改为 Next.js standalone server。
+- `.env.example`：将初始化管理员说明调整为仅在系统无管理员时生效。
+- `docs/nextjs-usage.md`：更新管理员、访客访问 Key、迁移和撤销行为说明。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚点：本轮实施前的“Next.js 管理员加普通用户绑定实例”工作区状态。回滚前必须先恢复迁移前的 SQLite 备份；仅回退代码无法恢复已删除的普通用户、Session 和绑定数据。由于该基线尚未形成独立提交，不应使用整仓 `git restore`，应按上述文件清单反向恢复。
+
+## 2026-07-11 - Task: 修复 standalone 页面静态资源未加载
+
+### What was done
+
+- 修复本地 `npm start` 启动 standalone 服务时没有携带 `.next/static` 的问题，避免页面只有初始加载文字且 React 无法继续执行。
+- 构建完成后自动把浏览器所需的 CSS 和 JavaScript 复制到 standalone 输出目录。
+- Docker 镜像改为直接复制已完整准备的 standalone 输出，避免重复维护静态资源复制步骤。
+- 更新本地构建与启动说明，明确 `npm run build` 会准备完整 standalone 目录。
+
+### Testing
+
+- `npm run build`：通过；Next.js 生产构建成功，构建后脚本已生成 `.next/standalone/.next/static`。
+- `npm test`：通过；共 14 项测试。
+- 页面静态资源冒烟测试：使用临时内存 SQLite 在 `127.0.0.1:4185` 启动 standalone 服务；首页返回 HTTP 200，首页引用的 CSS 和全部 JavaScript 文件均返回 HTTP 200；测试进程已停止。
+- 未访问真实 New API，也未创建或修改真实渠道。
+
+### Notes
+
+- `prepare-standalone.js`：将 `.next/static` 复制到 standalone 服务实际读取的目录。
+- `package.json`：在生产构建完成后执行 standalone 静态资源准备脚本。
+- `Dockerfile`：移除重复的静态资源复制步骤，直接使用完整 standalone 输出。
+- `docs/nextjs-usage.md`：补充构建过程会准备 CSS 和 JavaScript 静态资源的说明。
+- `progress.md`：追加本轮修复、验证证据和回滚方式。
+- 回滚方式：将 `package.json` 的构建命令恢复为仅执行 `next build`，删除 `prepare-standalone.js`，并恢复 Dockerfile 中单独复制 `.next/static` 的步骤；但本地 `npm start` 将重新出现静态资源 404，不建议回滚。
+
+## 2026-07-11 - Task: 增加管理员跨实例 Key 记录总览
+
+### What was done
+
+- 在管理端顶部增加“全部 Key 记录”总览，集中显示所有 New API 实例已导入的 Anthropic Key 渠道记录。
+- 支持按 New API 实例、渠道名称和完整 Anthropic Key 筛选，列表使用服务端分页，避免实例或记录增加后一次加载全部数据。
+- 记录列表展示所属实例、渠道名称与 ID、Key 掩码、状态、累计用量、导入时间和最后同步时间，并可直接进入所属实例工作区。
+- 新增管理员专用查询接口；访客无法调用，完整 Anthropic Key 仅在请求内用于计算指纹，不会写入数据库或出现在响应中。
+
+### Testing
+
+- `node --test "test/authorization.test.js"`：通过；覆盖管理员跨实例查询、实例/渠道/完整 Key 组合筛选、响应不包含完整 Key，以及访客访问总览接口返回 403。
+- `npm test`：通过；共 15 项测试。
+- `npm run build`：通过；Next.js 生产构建成功，`/api/admin/records/query` 已加入 Route Handler 清单。
+- `git diff --check`：通过，未发现空白错误。
+- 编辑器诊断：已检查数据层、管理员查询接口、管理端组件、样式和授权测试，未发现诊断错误。
+- 未访问真实 New API，也未创建或修改真实渠道。
+
+### Notes
+
+- `lib/application-store.js`：增加管理员跨实例渠道记录分页、实例筛选、渠道名称匹配和完整 Key 指纹精确查询。
+- `app/api/admin/records/query/route.js`：新增管理员专用 Key 总览查询接口与请求参数校验。
+- `components/admin-records-overview.js`：新增管理端 Key 记录筛选、分页、脱敏展示和实例跳转组件。
+- `components/admin-dashboard.js`：在管理端顶部接入跨实例 Key 记录总览。
+- `app/globals.css`：增加总览筛选区、记录表和移动端布局样式。
+- `test/authorization.test.js`：新增管理员跨实例记录查询与访客拒绝访问测试。
+- `docs/nextjs-usage.md`：说明管理员 Key 总览的使用方式和完整 Key 安全边界。
+- `progress.md`：追加本轮实现、验证证据和回滚方式。
+- 回滚方式：删除管理员记录查询接口和总览组件，并移除管理端接入、对应样式与授权测试；数据结构未变更，现有渠道记录不受影响。
+
+## 2026-07-11 - Task: 增加全局轻提示反馈
+
+### What was done
+
+- 增加固定在页面右上角的全局轻提示，区分成功、信息和错误状态，支持自动消失及手动关闭，并适配移动端和减少动画偏好。
+- 为实例保存与连接测试、访问 Key 生成复制与停用、管理员和访客登录、会话失效、管理数据读取、跨实例记录查询、渠道导入、历史查询及用量同步补充即时反馈。
+- 保留页面内原有的详细状态、导入进度和查询摘要；轻提示只负责让当前操作结果立即可见，未对被动加载成功和正常翻页增加干扰提示。
+
+### Testing
+
+- `npm test`：通过；共 15 项测试。
+- `npm run build`：通过；Next.js 16.2.10 生产构建成功，提示组件和全部接入页面完成编译。
+- `git diff --check`：通过，未发现空白错误。
+- 编辑器诊断：已检查本轮修改文件，未发现诊断错误。
+- 未访问真实 New API，也未创建或修改真实渠道。
+
+### Notes
+
+- `lib/toast.js`：新增浏览器端全局提示事件发送工具。
+- `components/toast-viewport.js`：新增提示队列、自动关闭和手动关闭界面。
+- `app/layout.js`：在应用根布局挂载全局提示容器。
+- `app/globals.css`：增加提示状态、固定定位、移动端和减少动画样式。
+- `components/admin-dashboard.js`：为实例管理、连接测试和访问 Key 操作增加提示。
+- `components/admin-records-overview.js`：为跨实例 Key 记录读取失败增加提示。
+- `components/access-gateway.js`、`components/login-view.js`：为访客访问 Key 和管理员登录失败增加提示。
+- `components/application-client.js`：为认证成功、退出和会话失效增加提示。
+- `components/instance-workspace.js`：为导入、历史查询、条件清除和用量同步增加提示。
+- `docs/nextjs-usage.md`：补充轻提示的显示范围和保留页面详细反馈的说明。
+- `progress.md`：追加本轮实现、验证证据和回滚方式。
+- 回滚方式：删除 `lib/toast.js` 和 `components/toast-viewport.js`，移除根布局挂载、提示样式及各组件中的 `showToast` 调用；该回滚不涉及 SQLite 数据结构或已有渠道记录。
+
+## 2026-07-11 - Task: 支持自定义渠道优先级和权重
+
+### What was done
+
+- 在管理员新增和编辑 New API 实例时增加渠道优先级、渠道权重配置，并在实例卡片中展示当前值。
+- 将两个配置作为实例级渠道默认值持久化到 SQLite；schema 升级到 v3，现有实例和旧数据占位实例自动迁移为优先级 `0`、权重 `0`。
+- 渠道导入时把实例配置的 `priority` 和 `weight` 写入 New API 渠道创建请求；访客提交导入时不能覆盖管理员配置。
+- 优先级允许 JavaScript 安全整数范围内的负数或非负数，权重只允许非负安全整数，浏览器和服务端均执行输入约束。
+- 旧版单实例环境迁移配置增加可选的 `CHANNEL_PRIORITY` 和 `CHANNEL_WEIGHT`。
+
+### Testing
+
+- `npm test`：通过；共 16 项测试，覆盖默认值、负优先级、非负权重、非法输入、SQLite v1 到 v3 迁移，以及非零配置进入 New API 创建 payload。
+- `npm run build`：通过；Next.js 16.2.10 生产构建成功，管理员表单、实例 API 和导入链路完成编译。
+- 自动化测试只使用内存或临时 SQLite 和模拟 New API；未访问真实 New API，也未创建或修改真实渠道。
+
+### Notes
+
+- `lib/validation.js`：增加优先级和权重的默认值、整数范围校验及导入参数归一化。
+- `lib/admin-validation.js`：将管理员实例输入中的优先级和权重纳入服务端校验。
+- `lib/application-store.js`：增加 `channel_priority`、`channel_weight` 字段、v3 自动迁移、实例映射和保存更新逻辑。
+- `lib/runtime-context.js`：支持旧版初始实例环境变量并将配置加载到实例运行时。
+- `lib/instance-service.js`、`lib/new-api-client.js`：将实例默认值传入 New API 渠道创建 payload。
+- `app/api/instances/[instanceId]/config/route.js`：在实例渠道默认配置中返回优先级和权重。
+- `components/admin-dashboard.js`：增加配置输入、编辑回填、提交转换和实例卡片展示。
+- `.env.example`、`docs/nextjs-usage.md`：补充默认值、输入规则和迁移配置说明。
+- `test/validation.test.js`、`test/application-store.test.js`、`test/instance-route.test.js`：增加校验、迁移和创建 payload 回归覆盖。
+- 回滚方式：移除上述字段和调用链，并把 `CURRENT_SCHEMA_VERSION` 恢复为 `2`。SQLite 已添加的列可保留不用；如必须物理删除列，应先备份数据库并通过新表迁移，不应直接对生产数据库执行破坏性操作。
+
+## 2026-07-11 - Task: 修复 standalone 重建后实例配置消失
+
+### What was done
+
+- 定位到 standalone `server.js` 会把进程工作目录切换到 `.next/standalone`，导致相对 `DATABASE_PATH` 被错误解析到构建输出目录；后续 `npm run build` 重建 `.next` 时数据库随之丢失。
+- 将相对数据库路径固定解析到应用项目根目录，并在本地生产启动脚本中显式传递项目根路径；绝对路径和 `:memory:` 保持原有行为。
+- 停止旧服务并备份根目录旧数据库，重新构建后完成旧数据自动迁移；最终服务继续使用 `data/channel-records.sqlite`。
+- 增加路径解析回归测试，并更新文档，明确正式数据库不得放在 `.next` 等构建目录。
+
+### Testing
+
+- `npm test`：通过；共 17 项测试，新增覆盖 standalone 环境下相对数据库路径固定解析到项目根目录。
+- `npm run build`：通过；Next.js 16.2.10 生产构建成功。
+- 持久化完整验证：根目录数据库迁移后为 schema v3、包含 2 个实例；停止服务并再次执行 `npm run build` 后实例数仍为 2；重新启动后仍为 2。
+- 服务健康检查：`GET /api/auth/me` 返回预期的 HTTP 401。
+- 构建输出检查：新的 `.next/standalone/data` 不再生成业务数据库。
+- `git diff --check`：通过；编辑器诊断未发现错误。
+- 未连接真实 New API，也未创建或修改真实渠道。
+
+### Notes
+
+- `lib/runtime-context.js`：增加数据库路径解析函数，将相对路径绑定到应用根目录。
+- `package.json`：本地 `npm start` 显式传递 `APPLICATION_ROOT_PATH`。
+- `test/runtime-context.test.js`：验证相对路径、绝对路径和内存数据库路径规则。
+- `docs/nextjs-usage.md`：补充 standalone 数据持久化和构建目录限制说明。
+- `backups/channel-records-before-path-fix-20260711.sqlite`：保存修复前的根目录旧数据库备份。
+- `progress.md`：追加本轮根因、验证证据和回滚方式。
+- 回滚方式：恢复 `lib/runtime-context.js` 和 `package.json` 的旧路径行为并删除对应测试；这会重新导致本地 standalone 把 SQLite 写入 `.next`，不建议回滚。数据库回滚可在停止服务后使用本轮备份恢复，但会丢弃修复后产生的数据，执行前必须再次确认。
+
+## 2026-07-11 - Task: 使用弹窗编辑并支持安全删除实例
+
+### What was done
+
+- 将实例编辑从页面顶部复用表单改为当前页面弹窗，移除自动滚动到顶部的行为；新增实例表单继续保持独立，编辑时管理员密码留空仍表示保留原密码。
+- 在每个实例卡片增加删除入口和二次确认弹窗，明确展示即将删除的本地渠道历史数量，并提示不会连接 New API 或删除上游真实渠道。
+- 删除操作使用 SQLite 事务，仅清除本地实例配置、实例访问 Key、访客 Session 和该实例渠道历史；其他实例、管理员账号及 New API 上游渠道不受影响。
+- 删除成功后刷新实例列表和管理员跨实例 Key 总览，并清除浏览器内仅本次显示的对应完整访问 Key。
+- 为管理员删除接口增加同源与管理员权限保护，并在实例列表响应中提供本地渠道记录数量供确认界面展示。
+
+### Testing
+
+- `npm test`：通过；共 18 项测试，覆盖本地渠道记录计数、实例事务删除、访客 Session 失效、其他实例保留、匿名和访客拒绝删除、管理员删除成功及重复删除返回 404。
+- `npm run build`：通过；Next.js 16.2.10 生产构建成功，实例编辑弹窗、删除确认界面和 `DELETE /api/admin/instances/[instanceId]` 完成编译。
+- 编辑器诊断：已检查本轮相关组件、样式、数据层、接口和测试，未发现诊断错误。
+- 自动化测试只使用内存或临时 SQLite；未访问真实 New API，也未创建、修改或删除真实渠道。
+
+### Notes
+
+- `components/admin-dashboard.js`：拆分新增和编辑表单状态，增加编辑弹窗、删除确认弹窗、删除反馈与列表刷新。
+- `components/admin-records-overview.js`：支持删除实例后重置筛选并重新读取跨实例记录。
+- `app/globals.css`：增加危险操作按钮、弹窗遮罩、弹窗布局和移动端可用的滚动约束。
+- `lib/application-store.js`：实例列表增加本地渠道记录计数，并增加事务化本地实例删除。
+- `app/api/admin/instances/[instanceId]/route.js`：增加管理员专用 DELETE Route Handler；该接口不创建 New API 客户端，也不发起上游请求。
+- `test/application-store.test.js`、`test/authorization.test.js`：增加数据清理、Session 撤销和删除授权回归覆盖。
+- `docs/nextjs-usage.md`：说明弹窗编辑、本地删除范围、上游渠道安全边界和备份要求。
+- 回滚方式：移除实例 DELETE Route Handler、数据层删除方法、列表记录计数、管理端删除按钮与弹窗及对应测试；数据结构未变化，不需要执行 SQLite schema 回滚。已经删除的本地数据无法通过代码回滚恢复，只能使用操作前备份恢复。
+
+## 2026-07-11 - Task: 移除管理端重复成功提示
+
+### What was done
+
+- 移除管理端操作成功后显示在页面内容区的绿色提示，创建、编辑、删除、连接测试和访问 Key 操作统一只使用右上角轻提示反馈。
+- 保留页面内错误信息，操作失败时仍可持续查看具体原因和请求信息。
+- 清理不再使用的成功消息状态及赋值逻辑。
+
+### Testing
+
+- `npm run build`：通过；Next.js 生产构建成功。
+- 编辑器诊断：已检查 `components/admin-dashboard.js`，未发现诊断错误。
+- 本轮仅调整管理端反馈展示，未访问 New API，也未修改 SQLite 数据。
+
+### Notes
+
+- `components/admin-dashboard.js`：删除重复的页面内成功提示和对应状态，保留轻提示及页面内错误反馈。
+- `progress.md`：追加本轮界面精简和验证记录。
+- 回滚方式：恢复 `message` 状态、各成功操作的 `setMessage` 调用以及页面中的 `notice-message` 渲染。
+
+## 2026-07-11 - Task: 移除管理端顶部标题栏
+
+### What was done
+
+- 移除管理页顶部的“系统管理”标题和手动刷新按钮，页面直接从跨实例 Key 记录总览开始展示。
+- 保留页面首次进入时自动加载，以及创建、编辑、删除和访问 Key 操作后的自动刷新，不影响数据更新。
+- 清理标题栏对应的专用样式，并保持管理页顶部间距紧凑。
+
+### Testing
+
+- `npm run build`：通过；Next.js 生产构建成功。
+- 编辑器诊断：已检查管理端组件和全局样式，未发现诊断错误。
+- 残留引用检查：未发现管理端标题栏、刷新按钮或对应专用样式引用。
+- 本轮仅调整界面结构，未访问 New API，也未修改 SQLite 数据。
+
+### Notes
+
+- `components/admin-dashboard.js`：删除管理页标题和手动刷新栏。
+- `app/globals.css`：删除不再使用的管理页标题栏样式，保留紧凑页面顶部间距。
+- `progress.md`：追加本轮界面精简和验证记录。
+- 回滚方式：在管理页顶部恢复标题栏和调用 `loadManagementData` 的刷新按钮，并恢复 `admin-title-row` 样式。

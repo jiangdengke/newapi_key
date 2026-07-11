@@ -10,4 +10,5 @@ docs
 test
 progress.md
 node_modules
+.next
 npm-debug.log*

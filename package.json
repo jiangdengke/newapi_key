@@ -5,11 +5,20 @@
   "type": "module",
   "description": "Import Anthropic keys into New API channels with sequential names.",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node --test"
+    "build": "next build && node prepare-standalone.js",
+    "start": "APPLICATION_ROOT_PATH=\"$PWD\" HOSTNAME=127.0.0.1 PORT=4173 node .next/standalone/server.js",
+    "dev": "next dev --hostname 127.0.0.1 --port 4173",
+    "test": "node --test test/*.test.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
+  },
+  "dependencies": {
+    "next": "^16.2.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "overrides": {
+    "postcss": "8.5.16"
   }
 }

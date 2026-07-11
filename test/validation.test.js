@@ -61,6 +61,8 @@ test("validateChannelDefaults accepts fixed and automatic date modes", () => {
       namePrefix: "claude",
       startNumber: 12,
       continueFromExisting: false,
+      priority: 0,
+      weight: 0,
       dateMode: "0711",
       dateSegment: "0711",
     },
@@ -71,6 +73,27 @@ test("validateChannelDefaults accepts fixed and automatic date modes", () => {
   assert.match(automaticDefaults.dateSegment, /^\d{4}$/);
 });
 
+test("channel priority and weight accept safe integer values", () => {
+  const channelDefaults = validateChannelDefaults({
+    priority: "-10",
+    weight: "25",
+  });
+  assert.equal(channelDefaults.priority, -10);
+  assert.equal(channelDefaults.weight, 25);
+
+  const importInput = validateImportInput({
+    keys: ["sk-example"],
+    namePrefix: "claude",
+    dateSegment: "0711",
+    startNumber: 1,
+    group: "anthropic",
+    priority: 12,
+    weight: 30,
+  });
+  assert.equal(importInput.priority, 12);
+  assert.equal(importInput.weight, 30);
+});
+
 test("validateChannelDefaults rejects invalid environment values", () => {
   assert.throws(
     () => validateChannelDefaults({ continueFromExisting: "sometimes" }),
@@ -79,6 +102,14 @@ test("validateChannelDefaults rejects invalid environment values", () => {
   assert.throws(
     () => validateChannelDefaults({ dateMode: "today" }),
     (error) => error instanceof ValidationError && /auto 或 4 位日期段/.test(error.message),
+  );
+  assert.throws(
+    () => validateChannelDefaults({ priority: "1.5" }),
+    (error) => error instanceof ValidationError && /优先级必须是安全整数/.test(error.message),
+  );
+  assert.throws(
+    () => validateChannelDefaults({ weight: "-1" }),
+    (error) => error instanceof ValidationError && /权重必须是非负安全整数/.test(error.message),
   );
 });
 
