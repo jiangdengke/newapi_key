@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS = 30_000;
 
 function createEmptyQuery(pageSize = DEFAULT_PAGE_SIZE) {
   return {
@@ -72,11 +73,20 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
   const [pendingDeletionRecordIds, setPendingDeletionRecordIds] = useState([]);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSynchronizing, setIsSynchronizing] = useState(false);
+  const [isAutomaticSynchronizationEnabled, setIsAutomaticSynchronizationEnabled] = useState(false);
   const [message, setMessage] = useState("正在读取全部 Key 记录...");
+  const synchronizationInProgressRef = useRef(false);
+  const automaticSynchronizationRef = useRef(null);
 
-  async function loadRecords(nextQuery) {
-    setIsLoading(true);
-    setMessage("正在读取全部 Key 记录...");
+  async function loadRecords(nextQuery, {
+    preserveSelection = false,
+    showLoadingState = true,
+  } = {}) {
+    if (showLoadingState) {
+      setIsLoading(true);
+      setMessage("正在读取全部 Key 记录...");
+    }
     try {
       const responsePayload = await requestJson("/api/admin/records/query", {
         method: "POST",
@@ -88,7 +98,9 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
         page: loadedRecordData.page,
       });
       setRecordData(loadedRecordData);
-      setSelectedRecordIds([]);
+      if (!preserveSelection) {
+        setSelectedRecordIds([]);
+      }
       setMessage(
         `共 ${loadedRecordData.total} 条记录，余额 `
         + formatUsd(loadedRecordData.totalBalanceUsd)
@@ -100,7 +112,9 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
       setMessage(errorMessage);
       showToast(errorMessage, { type: "error" });
     } finally {
-      setIsLoading(false);
+      if (showLoadingState) {
+        setIsLoading(false);
+      }
     }
   }
 
@@ -111,6 +125,73 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
     setRevealedKeys({});
     loadRecords(createEmptyQuery());
   }, [refreshToken]);
+
+  async function synchronizeRecords({ automatic = false } = {}) {
+    if (synchronizationInProgressRef.current) {
+      return;
+    }
+    synchronizationInProgressRef.current = true;
+    setIsSynchronizing(true);
+    if (!automatic) {
+      setMessage("正在同步全部实例的渠道状态、余额和用量...");
+    }
+    try {
+      const responsePayload = await requestJson("/api/admin/records", {
+        method: "POST",
+        body: "{}",
+      });
+      await loadRecords(activeQuery, {
+        preserveSelection: true,
+        showLoadingState: false,
+      });
+      const synchronizationData = responsePayload.data;
+      const failureMessage = synchronizationData.failedInstanceCount > 0
+        ? `，${synchronizationData.failedInstanceCount} 个实例失败`
+        : "";
+      const missingMessage = synchronizationData.missingCount > 0
+        ? `，${synchronizationData.missingCount} 个渠道不存在`
+        : "";
+      const successMessage = (
+        `已同步 ${synchronizationData.instanceCount} 个实例、`
+        + `${synchronizationData.synchronizedCount} 个渠道`
+        + missingMessage
+        + failureMessage
+      );
+      setMessage(successMessage);
+      if (!automatic) {
+        showToast(successMessage, {
+          type: synchronizationData.failedInstanceCount > 0 ? "error" : "success",
+        });
+      }
+    } catch (error) {
+      const errorMessage = `同步失败：${error?.message || "未知错误"}`;
+      setMessage(errorMessage);
+      if (!automatic) {
+        showToast(errorMessage, { type: "error" });
+      }
+    } finally {
+      synchronizationInProgressRef.current = false;
+      setIsSynchronizing(false);
+    }
+  }
+
+  automaticSynchronizationRef.current = () => {
+    if (!synchronizationInProgressRef.current) {
+      synchronizeRecords({ automatic: true });
+    }
+  };
+
+  useEffect(() => {
+    if (!isAutomaticSynchronizationEnabled) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        automaticSynchronizationRef.current?.();
+      }
+    }, AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS);
+    return () => window.clearInterval(intervalId);
+  }, [isAutomaticSynchronizationEnabled]);
 
   async function loadRecordKey(record) {
     if (revealedKeys[record.id]) {
@@ -235,6 +316,26 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
         <div>
           <h2>全部 Key 记录</h2>
           <p>{message}</p>
+        </div>
+        <div className="record-sync-actions">
+          <label className="automatic-sync-control">
+            <input
+              type="checkbox"
+              checked={isAutomaticSynchronizationEnabled}
+              onChange={(event) => setIsAutomaticSynchronizationEnabled(
+                event.target.checked,
+              )}
+            />
+            自动同步（30 秒）
+          </label>
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={isSynchronizing || isDeleting || instances.length === 0}
+            onClick={() => synchronizeRecords()}
+          >
+            {isSynchronizing ? "正在同步..." : "同步全部实例"}
+          </button>
         </div>
       </div>
 

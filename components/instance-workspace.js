@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS = 30_000;
 
 function createInitialProgress() {
   return {
@@ -82,10 +83,13 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     pageSize: DEFAULT_PAGE_SIZE,
     total: 0,
     totalPages: 1,
+    totalBalanceUsd: 0,
     totalUsedUsd: 0,
   });
   const [historyMessage, setHistoryMessage] = useState("正在读取本地记录...");
   const [pageError, setPageError] = useState("");
+  const synchronizationInProgressRef = useRef(false);
+  const automaticSynchronizationRef = useRef(null);
   const uniqueKeys = useMemo(() => normalizeKeyLines(keysText), [keysText]);
 
   async function loadConfiguration() {
@@ -337,9 +341,15 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     }
   }
 
-  async function synchronizeHistory() {
+  async function synchronizeHistory({ automatic = false } = {}) {
+    if (synchronizationInProgressRef.current) {
+      return;
+    }
+    synchronizationInProgressRef.current = true;
     setIsSynchronizing(true);
-    setHistoryMessage("正在从 New API 同步渠道状态、余额和用量...");
+    if (!automatic) {
+      setHistoryMessage("正在从 New API 同步渠道状态、余额和用量...");
+    }
     try {
       const responsePayload = await requestJson(
         `/api/instances/${instanceId}/records/sync`,
@@ -353,15 +363,38 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
         `已同步 ${responsePayload.data.synchronizedCount} 个渠道${missingMessage}`
       );
       setHistoryMessage(successMessage);
-      showToast(successMessage, { type: "success" });
+      if (!automatic) {
+        showToast(successMessage, { type: "success" });
+      }
     } catch (error) {
       const errorMessage = `同步失败：${error?.message || "未知错误"}`;
       setHistoryMessage(errorMessage);
-      showToast(errorMessage, { type: "error" });
+      if (!automatic) {
+        showToast(errorMessage, { type: "error" });
+      }
     } finally {
+      synchronizationInProgressRef.current = false;
       setIsSynchronizing(false);
     }
   }
+
+  automaticSynchronizationRef.current = () => {
+    if (!isImporting && !synchronizationInProgressRef.current) {
+      synchronizeHistory({ automatic: true });
+    }
+  };
+
+  useEffect(() => {
+    if (!isAutomaticSynchronizationEnabled) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        automaticSynchronizationRef.current?.();
+      }
+    }, AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS);
+    return () => window.clearInterval(intervalId);
+  }, [isAutomaticSynchronizationEnabled]);
 
   if (!configuration) {
     return (
@@ -441,9 +474,27 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       <section className="panel history-panel" aria-live="polite">
         <div className="history-header">
           <div><h2>已导入渠道</h2><p>{historyMessage}</p></div>
-          <button className="button button-secondary" type="button" disabled={!instance.enabled || isImporting || isSynchronizing} onClick={synchronizeHistory}>
-            {isSynchronizing ? "正在同步..." : "刷新余额和用量"}
-          </button>
+          <div className="record-sync-actions">
+            <label className="automatic-sync-control">
+              <input
+                type="checkbox"
+                checked={isAutomaticSynchronizationEnabled}
+                disabled={!instance.enabled || isImporting}
+                onChange={(event) => setIsAutomaticSynchronizationEnabled(
+                  event.target.checked,
+                )}
+              />
+              自动同步（30 秒）
+            </label>
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={!instance.enabled || isImporting || isSynchronizing}
+              onClick={() => synchronizeHistory()}
+            >
+              {isSynchronizing ? "正在同步..." : "刷新余额和用量"}
+            </button>
+          </div>
         </div>
         <form className="history-search-form" autoComplete="off" onSubmit={submitHistorySearch}>
           <input type="password" placeholder="粘贴完整 Key 精确查询" spellCheck="false" value={historySearchInput} onChange={(event) => setHistorySearchInput(event.target.value)} />

@@ -443,6 +443,42 @@ textarea:focus {
   margin-bottom: 22px;
 }
 
+.record-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 14px;
+}
+
+.automatic-sync-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #536078;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.automatic-sync-control input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .panel-heading,
+  .history-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .record-sync-actions {
+    justify-content: flex-start;
+  }
+}
+
 .modal-backdrop {
   position: fixed;
   z-index: 100;
