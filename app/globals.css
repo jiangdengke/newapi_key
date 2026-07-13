@@ -1009,3 +1009,97 @@ textarea:focus {
     grid-template-columns: 1fr 1fr;
   }
 }
+.record-key-cell {
+  min-width: 280px;
+}
+
+.record-key-value {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.record-key-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.button-compact {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.record-key-unavailable {
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.pagination-controls,
+.page-size-control {
+  display: flex;
+  align-items: center;
+}
+
+.pagination-controls {
+  gap: 10px;
+}
+
+.page-size-control {
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.page-size-control select {
+  width: auto;
+  min-width: 88px;
+}
+
+.admin-record-batch-actions,
+.record-row-actions {
+  display: flex;
+  align-items: center;
+}
+
+.admin-record-batch-actions {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.record-row-actions {
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.record-selection-column {
+  width: 44px;
+  text-align: center;
+}
+
+.record-selection-checkbox {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  padding: 0;
+  vertical-align: middle;
+}
+
+@media (max-width: 720px) {
+  .admin-record-batch-actions {
+    align-items: stretch;
+  }
+
+  .record-row-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

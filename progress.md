@@ -702,3 +702,79 @@
 - `README.md`：新增项目介绍、环境配置和 Docker Compose 使用说明。
 - `progress.md`：追加本轮文档交付和验证记录。
 - 回滚方式：删除根目录 `README.md`，并删除本轮 `progress.md` 追加内容；该回滚不影响应用代码、Docker 数据卷或 SQLite 数据。
+
+## 2026-07-11 - Task: 支持管理员查看和复制导入 Key
+
+### What was done
+
+- 为本地渠道记录增加可迁移的 `encrypted_key` 字段，新导入的 Anthropic Key 使用现有 `CREDENTIAL_ENCRYPTION_KEY` 以 AES-256-GCM 加密保存。
+- 增加管理员专用 Key 读取接口；列表和访客接口仍只返回掩码，历史未保存密文的记录明确标记为不可恢复。
+- 在跨实例 Key 总览中增加按需显示、复制和隐藏操作，并补充匿名、访客、管理员、缺失记录和历史记录场景的回归覆盖。
+
+### Testing
+
+- `npm test`：通过；共 19 项测试，覆盖 schema 迁移、密文存储、管理员解密读取、匿名和访客拒绝访问、历史记录返回 409 以及列表脱敏。
+- `npm run build`：通过；Next.js 生产构建成功，管理员 Key 读取 Route Handler 完成编译。
+- 编辑器诊断：已检查本轮数据层、接口、管理端组件、样式和测试，未发现诊断错误。
+- 未访问真实 New API，也未在日志中记录完整 Anthropic Key。
+
+### Notes
+
+- `lib/application-store.js`：将 schema 版本升级到 4，迁移并保存加密 Key，增加管理员专用解密查询和列表可用性标记。
+- `app/api/admin/records/[recordId]/key/route.js`：增加仅管理员可调用的完整 Key 读取接口，不记录明文并返回 `no-store` 响应。
+- `components/admin-records-overview.js`：增加紧凑的显示、复制和隐藏操作，历史不可恢复记录不提供复制操作。
+- `app/globals.css`：增加 Key 操作区和紧凑按钮样式。
+- `test/application-store.test.js`、`test/authorization.test.js`：增加迁移、密文、解密读取和授权回归覆盖。
+- `docs/nextjs-usage.md`：说明完整 Key 的加密保存、管理员按需读取、历史记录限制和加密密钥不可更换要求。
+- `progress.md`：追加本轮实现与验证记录。
+- 回滚方式：恢复 schema 版本 3、移除 `encrypted_key` 写入和管理员读取接口及前端操作；已有 schema 4 数据需要从变更前 SQLite 备份恢复，不能通过降级代码安全还原。
+
+## 2026-07-13 - Task: 支持调整渠道记录每页数量
+
+### What was done
+
+- 管理端“全部 Key 记录”和实例内“已导入渠道”统一默认每页显示 10 条。
+- 两处分页区域均增加每页数量选择，支持 10、20、50 和 100 条；切换后自动回到第 1 页并保留当前筛选条件。
+- 查询、清除、导入后刷新和用量同步继续沿用当前选择的每页数量。
+
+### Testing
+
+- `npm test`：通过；共 19 项测试，现有分页、查询、授权和导入回归均通过。
+- `npm run build`：通过；Next.js 生产构建成功，两处分页选择控件完成编译。
+- 编辑器诊断：已检查两个记录列表组件和全局样式，未发现诊断错误。
+- 本轮仅调整本地列表分页交互，未访问真实 New API，也未修改 SQLite 数据结构或数据。
+
+### Notes
+
+- `components/admin-records-overview.js`：管理端列表增加每页数量选项，并在查询和清除筛选时保留当前数量。
+- `components/instance-workspace.js`：实例内列表增加每页数量选项，并在查询、清除和刷新时保留当前数量。
+- `app/globals.css`：增加分页数量选择控件的紧凑布局样式。
+- `docs/nextjs-usage.md`：说明两个列表的默认每页数量和可选范围。
+- `progress.md`：追加本轮实现与验证记录。
+- 回滚方式：移除两个组件中的每页数量选项和切换处理，恢复所有查询固定使用 `pageSize: 10`，并删除对应样式与文档说明；无需回滚数据库。
+
+## 2026-07-13 - Task: 支持管理员单条和批量删除 Key 记录
+
+### What was done
+
+- 管理端 Key 记录表增加单条删除、当前页勾选、全选当前页和批量删除操作。
+- 删除前显示二次确认和待删除数量；删除成功后清理对应的已解密页面状态并按当前筛选、页码和每页数量刷新列表。
+- 新增管理员专用本地记录删除接口，每次最多删除 100 条；只删除 SQLite 记录，不连接 New API，也不删除上游真实渠道。
+
+### Testing
+
+- `npm test`：通过；共 20 项测试，覆盖匿名和访客拒绝删除、空选择校验、管理员批量删除、未选记录保留、实例配置保留及重复删除返回 404。
+- `npm run build`：通过；Next.js 生产构建成功，`DELETE /api/admin/records` 和管理端删除界面完成编译。
+- 编辑器诊断：已检查数据层、删除接口、管理端组件、样式和授权测试，未发现诊断错误。
+- 自动化测试只使用内存 SQLite；未访问真实 New API，也未创建、修改或删除上游渠道。
+
+### Notes
+
+- `lib/application-store.js`：增加按记录 ID 批量删除本地渠道记录的方法。
+- `app/api/admin/records/route.js`：增加管理员专用批量删除接口，限制数量并记录非敏感删除统计。
+- `components/admin-records-overview.js`：增加当前页选择、单条删除、批量删除、二次确认和删除后刷新。
+- `app/globals.css`：增加选择列、批量操作栏、行操作和移动端布局样式。
+- `test/authorization.test.js`：增加本地记录删除授权、输入校验和数据范围回归测试。
+- `docs/nextjs-usage.md`：说明记录删除范围、当前页批量选择和上游渠道保留边界。
+- `progress.md`：追加本轮实现与验证记录。
+- 回滚方式：移除管理员记录删除 Route Handler、数据层删除方法、表格选择和删除界面及对应测试与文档。本轮未修改数据库结构；已删除的本地记录只能从操作前 SQLite 备份恢复。

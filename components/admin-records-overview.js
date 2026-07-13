@@ -6,14 +6,15 @@ import { requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
 
 const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
-function createEmptyQuery() {
+function createEmptyQuery(pageSize = DEFAULT_PAGE_SIZE) {
   return {
     instanceId: null,
     channelName: "",
     key: "",
     page: 1,
-    pageSize: DEFAULT_PAGE_SIZE,
+    pageSize,
   };
 }
 
@@ -65,6 +66,11 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
   const [activeQuery, setActiveQuery] = useState(createEmptyQuery);
   const [recordData, setRecordData] = useState(createEmptyRecordData);
   const [isLoading, setIsLoading] = useState(true);
+  const [revealedKeys, setRevealedKeys] = useState({});
+  const [loadingKeyRecordId, setLoadingKeyRecordId] = useState(null);
+  const [selectedRecordIds, setSelectedRecordIds] = useState([]);
+  const [pendingDeletionRecordIds, setPendingDeletionRecordIds] = useState([]);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState("正在读取全部 Key 记录...");
 
   async function loadRecords(nextQuery) {
@@ -81,6 +87,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
         page: loadedRecordData.page,
       });
       setRecordData(loadedRecordData);
+      setSelectedRecordIds([]);
       setMessage(
         `共 ${loadedRecordData.total} 条记录，累计用量 `
         + formatUsd(loadedRecordData.totalUsedUsd),
@@ -98,8 +105,46 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
     setInstanceFilter("");
     setChannelNameFilter("");
     setKeyFilter("");
+    setRevealedKeys({});
     loadRecords(createEmptyQuery());
   }, [refreshToken]);
+
+  async function loadRecordKey(record) {
+    if (revealedKeys[record.id]) {
+      return revealedKeys[record.id];
+    }
+    setLoadingKeyRecordId(record.id);
+    try {
+      const responsePayload = await requestJson(`/api/admin/records/${record.id}/key`, {
+        method: "POST",
+        body: "{}",
+      });
+      const recordKey = responsePayload.data.key;
+      setRevealedKeys((currentKeys) => ({
+        ...currentKeys,
+        [record.id]: recordKey,
+      }));
+      return recordKey;
+    } catch (error) {
+      showToast(error?.message || "读取完整 Key 失败", { type: "error" });
+      return null;
+    } finally {
+      setLoadingKeyRecordId(null);
+    }
+  }
+
+  async function copyRecordKey(record) {
+    const recordKey = await loadRecordKey(record);
+    if (!recordKey) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(recordKey);
+      showToast("完整 Key 已复制", { type: "success" });
+    } catch {
+      showToast("复制 Key 失败，请检查浏览器权限", { type: "error" });
+    }
+  }
 
   async function submitFilters(event) {
     event.preventDefault();
@@ -108,7 +153,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
       channelName: channelNameFilter.trim(),
       key: keyFilter.trim(),
       page: 1,
-      pageSize: DEFAULT_PAGE_SIZE,
+      pageSize: activeQuery.pageSize,
     });
   }
 
@@ -116,12 +161,70 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
     setInstanceFilter("");
     setChannelNameFilter("");
     setKeyFilter("");
-    await loadRecords(createEmptyQuery());
+    await loadRecords(createEmptyQuery(activeQuery.pageSize));
   }
 
   async function changePage(nextPage) {
     await loadRecords({ ...activeQuery, page: nextPage });
   }
+
+  async function changePageSize(event) {
+    await loadRecords({
+      ...activeQuery,
+      page: 1,
+      pageSize: Number(event.target.value),
+    });
+  }
+
+  function toggleRecordSelection(recordId) {
+    setSelectedRecordIds((currentRecordIds) => (
+      currentRecordIds.includes(recordId)
+        ? currentRecordIds.filter((currentRecordId) => currentRecordId !== recordId)
+        : [...currentRecordIds, recordId]
+    ));
+  }
+
+  function toggleCurrentPageSelection() {
+    const currentPageRecordIds = recordData.records.map((record) => record.id);
+    const allCurrentPageRecordsSelected = currentPageRecordIds.length > 0
+      && currentPageRecordIds.every((recordId) => selectedRecordIds.includes(recordId));
+    setSelectedRecordIds(allCurrentPageRecordsSelected ? [] : currentPageRecordIds);
+  }
+
+  function openDeleteConfirmation(recordIds) {
+    setPendingDeletionRecordIds(recordIds);
+  }
+
+  async function deleteRecords() {
+    setIsDeleting(true);
+    try {
+      const responsePayload = await requestJson("/api/admin/records", {
+        method: "DELETE",
+        body: JSON.stringify({ recordIds: pendingDeletionRecordIds }),
+      });
+      const deletedRecordIds = new Set(pendingDeletionRecordIds);
+      setRevealedKeys((currentKeys) => Object.fromEntries(
+        Object.entries(currentKeys).filter(([recordId]) => (
+          !deletedRecordIds.has(Number(recordId))
+        )),
+      ));
+      setPendingDeletionRecordIds([]);
+      setSelectedRecordIds([]);
+      await loadRecords(activeQuery);
+      showToast(
+        `已删除 ${responsePayload.data.deletedRecordCount} 条本地记录`,
+        { type: "success" },
+      );
+    } catch (error) {
+      showToast(error?.message || "删除本地记录失败", { type: "error" });
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  const currentPageRecordIds = recordData.records.map((record) => record.id);
+  const allCurrentPageRecordsSelected = currentPageRecordIds.length > 0
+    && currentPageRecordIds.every((recordId) => selectedRecordIds.includes(recordId));
 
   return (
     <section className="panel admin-records-panel" aria-busy={isLoading}>
@@ -176,10 +279,32 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
         </div>
       </form>
 
+      <div className="admin-record-batch-actions">
+        <span>已选择 {selectedRecordIds.length} 条当前页记录</span>
+        <button
+          className="button button-danger button-compact"
+          type="button"
+          disabled={selectedRecordIds.length === 0 || isLoading || isDeleting}
+          onClick={() => openDeleteConfirmation(selectedRecordIds)}
+        >
+          批量删除
+        </button>
+      </div>
+
       <div className="history-table-shell">
         <table className="history-table admin-record-table">
           <thead>
             <tr>
+              <th className="record-selection-column">
+                <input
+                  className="record-selection-checkbox"
+                  type="checkbox"
+                  aria-label="全选当前页"
+                  checked={allCurrentPageRecordsSelected}
+                  disabled={recordData.records.length === 0 || isLoading || isDeleting}
+                  onChange={toggleCurrentPageSelection}
+                />
+              </th>
               <th>New API 实例</th>
               <th>渠道</th>
               <th>Key</th>
@@ -193,12 +318,58 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
           <tbody>
             {recordData.records.map((record) => (
               <tr key={record.id}>
+                <td className="record-selection-column">
+                  <input
+                    className="record-selection-checkbox"
+                    type="checkbox"
+                    aria-label={`选择记录 ${record.channelName}`}
+                    checked={selectedRecordIds.includes(record.id)}
+                    disabled={isLoading || isDeleting}
+                    onChange={() => toggleRecordSelection(record.id)}
+                  />
+                </td>
                 <td><strong>{record.instanceName}</strong></td>
                 <td>
                   <strong>{record.channelName}</strong>
                   <small>渠道 ID：{record.newApiChannelId}</small>
                 </td>
-                <td className="history-key">{record.keyMask}</td>
+                <td className="history-key record-key-cell">
+                  <span className="record-key-value">
+                    {revealedKeys[record.id] || record.keyMask}
+                  </span>
+                  {record.keyAvailable ? (
+                    <span className="record-key-actions">
+                      <button
+                        className="button button-secondary button-compact"
+                        type="button"
+                        disabled={loadingKeyRecordId === record.id}
+                        onClick={() => {
+                          if (revealedKeys[record.id]) {
+                            setRevealedKeys((currentKeys) => {
+                              const nextKeys = { ...currentKeys };
+                              delete nextKeys[record.id];
+                              return nextKeys;
+                            });
+                            return;
+                          }
+                          loadRecordKey(record);
+                        }}
+                      >
+                        {revealedKeys[record.id] ? "隐藏" : "显示"}
+                      </button>
+                      <button
+                        className="button button-secondary button-compact"
+                        type="button"
+                        disabled={loadingKeyRecordId === record.id}
+                        onClick={() => copyRecordKey(record)}
+                      >
+                        复制
+                      </button>
+                    </span>
+                  ) : (
+                    <small className="record-key-unavailable">旧记录不可恢复</small>
+                  )}
+                </td>
                 <td>
                   <span className={`history-status history-status-${record.statusLabel}`}>
                     {getStatusText(record.statusLabel)}
@@ -208,18 +379,28 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
                 <td>{formatDateTime(record.importedAt, "未知时间")}</td>
                 <td>{formatDateTime(record.lastSyncedAt, "尚未同步")}</td>
                 <td>
-                  <button
-                    className="button button-secondary"
-                    type="button"
-                    onClick={() => onOpenInstance(record.instanceId)}
-                  >
-                    进入实例
-                  </button>
+                  <div className="record-row-actions">
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => onOpenInstance(record.instanceId)}
+                    >
+                      进入实例
+                    </button>
+                    <button
+                      className="button button-danger"
+                      type="button"
+                      disabled={isDeleting}
+                      onClick={() => openDeleteConfirmation([record.id])}
+                    >
+                      删除
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
             {!isLoading && recordData.records.length === 0 ? (
-              <tr><td className="history-empty" colSpan="8">没有符合条件的 Key 记录。</td></tr>
+              <tr><td className="history-empty" colSpan="9">没有符合条件的 Key 记录。</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -227,7 +408,19 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
 
       <div className="history-pagination">
         <span>第 {recordData.page} / {recordData.totalPages} 页</span>
-        <div>
+        <div className="pagination-controls">
+          <label className="page-size-control">
+            <span>每页</span>
+            <select
+              value={recordData.pageSize}
+              disabled={isLoading}
+              onChange={changePageSize}
+            >
+              {PAGE_SIZE_OPTIONS.map((pageSize) => (
+                <option key={pageSize} value={pageSize}>{pageSize} 条</option>
+              ))}
+            </select>
+          </label>
           <button
             className="button button-secondary"
             type="button"
@@ -246,6 +439,55 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
           </button>
         </div>
       </div>
+
+      {pendingDeletionRecordIds.length > 0 ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => {
+            if (!isDeleting) {
+              setPendingDeletionRecordIds([]);
+            }
+          }}
+        >
+          <div
+            className="modal-dialog modal-dialog-compact"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-records-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h2 id="delete-records-title">
+              {pendingDeletionRecordIds.length === 1 ? "删除这条记录？" : "批量删除记录？"}
+            </h2>
+            <p>
+              将永久删除本系统中的 {pendingDeletionRecordIds.length} 条 Key 记录，
+              包括本地用量历史和已加密的完整 Key。
+            </p>
+            <p className="delete-confirmation-summary">
+              New API 上游真实渠道不会被删除；删除后，本系统也不会再同步这些渠道。
+            </p>
+            <div className="modal-actions">
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setPendingDeletionRecordIds([])}
+              >
+                取消
+              </button>
+              <button
+                className="button button-danger"
+                type="button"
+                disabled={isDeleting}
+                onClick={deleteRecords}
+              >
+                {isDeleting ? "正在删除..." : `确认删除 ${pendingDeletionRecordIds.length} 条`}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

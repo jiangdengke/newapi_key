@@ -5,6 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
 
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
 function createInitialProgress() {
   return {
     summary: "等待提交",
@@ -68,11 +71,15 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   const [isImporting, setIsImporting] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
   const [historySearchInput, setHistorySearchInput] = useState("");
-  const [historyQuery, setHistoryQuery] = useState({ key: "", page: 1, pageSize: 10 });
+  const [historyQuery, setHistoryQuery] = useState({
+    key: "",
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+  });
   const [historyData, setHistoryData] = useState({
     records: [],
     page: 1,
-    pageSize: 10,
+    pageSize: DEFAULT_PAGE_SIZE,
     total: 0,
     totalPages: 1,
     totalUsedUsd: 0,
@@ -111,13 +118,13 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     let isActive = true;
     setConfiguration(null);
     setPageError("");
-    setHistoryQuery({ key: "", page: 1, pageSize: 10 });
+    setHistoryQuery({ key: "", page: 1, pageSize: DEFAULT_PAGE_SIZE });
     setHistorySearchInput("");
     Promise.all([
       requestJson(`/api/instances/${instanceId}/config`),
       requestJson(`/api/instances/${instanceId}/records/query`, {
         method: "POST",
-        body: JSON.stringify({ key: "", page: 1, pageSize: 10 }),
+        body: JSON.stringify({ key: "", page: 1, pageSize: DEFAULT_PAGE_SIZE }),
       }),
     ]).then(([configurationPayload, historyPayload]) => {
       if (!isActive) {
@@ -276,7 +283,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       const loadedHistoryData = await loadHistory({
         key: historySearchInput.trim(),
         page: 1,
-        pageSize: 10,
+        pageSize: historyQuery.pageSize,
       });
       showToast(`查询完成，共找到 ${loadedHistoryData.total} 条记录`, { type: "success" });
     } catch (error) {
@@ -289,7 +296,11 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   async function clearHistorySearch() {
     setHistorySearchInput("");
     try {
-      await loadHistory({ key: "", page: 1, pageSize: 10 });
+      await loadHistory({
+        key: "",
+        page: 1,
+        pageSize: historyQuery.pageSize,
+      });
       showToast("已清除 Key 查询条件", { type: "info" });
     } catch (error) {
       const errorMessage = `读取历史记录失败：${error?.message || "未知错误"}`;
@@ -303,6 +314,20 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       await loadHistory({ ...historyQuery, page: nextPage });
     } catch (error) {
       const errorMessage = `翻页失败：${error?.message || "未知错误"}`;
+      setHistoryMessage(errorMessage);
+      showToast(errorMessage, { type: "error" });
+    }
+  }
+
+  async function changeHistoryPageSize(event) {
+    try {
+      await loadHistory({
+        ...historyQuery,
+        page: 1,
+        pageSize: Number(event.target.value),
+      });
+    } catch (error) {
+      const errorMessage = `调整每页数量失败：${error?.message || "未知错误"}`;
       setHistoryMessage(errorMessage);
       showToast(errorMessage, { type: "error" });
     }
@@ -441,7 +466,15 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
         </div>
         <div className="history-pagination">
           <span>第 {historyData.page} / {historyData.totalPages} 页</span>
-          <div>
+          <div className="pagination-controls">
+            <label className="page-size-control">
+              <span>每页</span>
+              <select value={historyData.pageSize} onChange={changeHistoryPageSize}>
+                {PAGE_SIZE_OPTIONS.map((pageSize) => (
+                  <option key={pageSize} value={pageSize}>{pageSize} 条</option>
+                ))}
+              </select>
+            </label>
             <button className="button button-secondary" type="button" disabled={historyData.page <= 1} onClick={() => changeHistoryPage(historyData.page - 1)}>上一页</button>
             <button className="button button-secondary" type="button" disabled={historyData.page >= historyData.totalPages} onClick={() => changeHistoryPage(historyData.page + 1)}>下一页</button>
           </div>

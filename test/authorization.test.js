@@ -3,7 +3,9 @@ import test from "node:test";
 
 import { DELETE as deleteAdminInstance } from "../app/api/admin/instances/[instanceId]/route.js";
 import { GET as getAdminInstances } from "../app/api/admin/instances/route.js";
+import { DELETE as deleteAdministratorRecords } from "../app/api/admin/records/route.js";
 import { POST as queryAdministratorRecords } from "../app/api/admin/records/query/route.js";
+import { POST as revealAdministratorRecordKey } from "../app/api/admin/records/[recordId]/key/route.js";
 import { POST as loginWithAccessKey } from "../app/api/access/login/route.js";
 import { GET as getInstanceConfiguration } from "../app/api/instances/[instanceId]/config/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
@@ -71,8 +73,28 @@ function createDeleteRequest(pathname, sessionToken = null) {
   });
 }
 
+function createDeleteJsonRequest(pathname, sessionToken, body) {
+  const headers = {
+    "Content-Type": "application/json",
+    Host: "localhost",
+    Origin: "http://localhost",
+  };
+  if (sessionToken) {
+    headers.Cookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}`;
+  }
+  return new Request(`http://localhost${pathname}`, {
+    method: "DELETE",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
 function createRouteContext(instanceId) {
   return { params: Promise.resolve({ instanceId: String(instanceId) }) };
+}
+
+function createRecordRouteContext(recordId) {
+  return { params: Promise.resolve({ recordId: String(recordId) }) };
 }
 
 function installTestRuntimeContext(store) {
@@ -422,6 +444,201 @@ test("administrator can query masked records across instances", async () => {
       ),
     );
     assert.equal(visitorResponse.status, 403);
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+  }
+});
+
+test("only administrators can delete selected local records", async () => {
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 14),
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+
+  try {
+    const instance = store.createInstance(
+      createInstanceInput("first", "https://first.example.com"),
+    );
+    for (const channelNumber of [201, 202, 203]) {
+      store.recordImportedChannel({
+        instanceId: instance.id,
+        baseUrl: instance.baseUrl,
+        key: `sk-ant-delete-record-${channelNumber}`,
+        channel: {
+          id: channelNumber,
+          name: `claude-0711-${channelNumber}`,
+          group: "anthropic",
+          models: "claude-opus-4-8",
+          status: 1,
+          used_quota: 0,
+        },
+        quotaPerUnit: 500_000,
+      });
+    }
+    const records = store.listRecords(instance.id);
+    const selectedRecordIds = records
+      .filter((record) => record.newApiChannelId !== 203)
+      .map((record) => record.id);
+    const remainingRecord = records.find((record) => record.newApiChannelId === 203);
+    const administrator = store.authenticateAdministrator(
+      "system-administrator",
+      ADMINISTRATOR_PASSWORD,
+    );
+    const administratorSession = store.createAdministratorSession(administrator.id);
+    const visitorAccess = store.regenerateInstanceAccessKey(instance.id);
+    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
+
+    const anonymousResponse = await deleteAdministratorRecords(
+      createDeleteJsonRequest("/api/admin/records", null, {
+        recordIds: selectedRecordIds,
+      }),
+    );
+    assert.equal(anonymousResponse.status, 401);
+
+    const visitorResponse = await deleteAdministratorRecords(
+      createDeleteJsonRequest("/api/admin/records", visitorSession.token, {
+        recordIds: selectedRecordIds,
+      }),
+    );
+    assert.equal(visitorResponse.status, 403);
+
+    const invalidResponse = await deleteAdministratorRecords(
+      createDeleteJsonRequest("/api/admin/records", administratorSession.token, {
+        recordIds: [],
+      }),
+    );
+    assert.equal(invalidResponse.status, 400);
+
+    const administratorResponse = await deleteAdministratorRecords(
+      createDeleteJsonRequest("/api/admin/records", administratorSession.token, {
+        recordIds: selectedRecordIds,
+      }),
+    );
+    assert.equal(administratorResponse.status, 200);
+    const administratorPayload = await administratorResponse.json();
+    assert.equal(administratorPayload.data.deletedRecordCount, 2);
+    assert.deepEqual(
+      store.listRecords(instance.id).map((record) => record.id),
+      [remainingRecord.id],
+    );
+    assert.equal(store.getInstance(instance.id).id, instance.id);
+
+    const repeatedResponse = await deleteAdministratorRecords(
+      createDeleteJsonRequest("/api/admin/records", administratorSession.token, {
+        recordIds: selectedRecordIds,
+      }),
+    );
+    assert.equal(repeatedResponse.status, 404);
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+  }
+});
+
+test("only administrators can reveal complete imported keys", async () => {
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 15),
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+  const importedKey = "sk-ant-reveal-administrator-record";
+
+  try {
+    const instance = store.createInstance(
+      createInstanceInput("first", "https://first.example.com"),
+    );
+    store.recordImportedChannel({
+      instanceId: instance.id,
+      baseUrl: instance.baseUrl,
+      key: importedKey,
+      channel: {
+        id: 111,
+        name: "claude-0711-111",
+        group: "anthropic",
+        models: "claude-opus-4-8",
+        status: 1,
+        used_quota: 0,
+      },
+      quotaPerUnit: 500_000,
+    });
+    const record = store.listRecords(instance.id)[0];
+    const administrator = store.authenticateAdministrator(
+      "system-administrator",
+      ADMINISTRATOR_PASSWORD,
+    );
+    const administratorSession = store.createAdministratorSession(administrator.id);
+    const visitorAccess = store.regenerateInstanceAccessKey(instance.id);
+    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
+    const routeContext = createRecordRouteContext(record.id);
+
+    const anonymousResponse = await revealAdministratorRecordKey(
+      createAuthenticatedPostRequest(
+        `/api/admin/records/${record.id}/key`,
+        "invalid-session",
+        {},
+      ),
+      routeContext,
+    );
+    assert.equal(anonymousResponse.status, 401);
+
+    const visitorResponse = await revealAdministratorRecordKey(
+      createAuthenticatedPostRequest(
+        `/api/admin/records/${record.id}/key`,
+        visitorSession.token,
+        {},
+      ),
+      routeContext,
+    );
+    assert.equal(visitorResponse.status, 403);
+
+    const administratorResponse = await revealAdministratorRecordKey(
+      createAuthenticatedPostRequest(
+        `/api/admin/records/${record.id}/key`,
+        administratorSession.token,
+        {},
+      ),
+      routeContext,
+    );
+    assert.equal(administratorResponse.status, 200);
+    const administratorPayload = await administratorResponse.json();
+    assert.equal(administratorPayload.data.key, importedKey);
+    assert.equal(administratorPayload.data.recordId, record.id);
+    assert.equal(administratorResponse.headers.get("cache-control"), "no-store");
+
+    const missingResponse = await revealAdministratorRecordKey(
+      createAuthenticatedPostRequest(
+        "/api/admin/records/9999/key",
+        administratorSession.token,
+        {},
+      ),
+      createRecordRouteContext(9999),
+    );
+    assert.equal(missingResponse.status, 404);
+
+    store.database.prepare(
+      "UPDATE channel_records SET encrypted_key = NULL WHERE id = ?",
+    ).run(record.id);
+    const legacyResponse = await revealAdministratorRecordKey(
+      createAuthenticatedPostRequest(
+        `/api/admin/records/${record.id}/key`,
+        administratorSession.token,
+        {},
+      ),
+      routeContext,
+    );
+    assert.equal(legacyResponse.status, 409);
   } finally {
     restoreRuntimeContext();
     store.close();
