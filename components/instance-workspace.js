@@ -71,6 +71,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   const [progress, setProgress] = useState(createInitialProgress);
   const [isImporting, setIsImporting] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
+  const [isAutomaticSynchronizationEnabled, setIsAutomaticSynchronizationEnabled] = useState(false);
   const [historySearchInput, setHistorySearchInput] = useState("");
   const [historyQuery, setHistoryQuery] = useState({
     key: "",
