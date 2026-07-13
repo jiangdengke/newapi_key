@@ -849,3 +849,25 @@
 - `lib/application-store.js`：阻止非零 `used_quota` 在无效换算单位下被静默归零。
 - `progress.md`：记录本轮修复和验证结果。
 - 回滚方式：恢复上述两个代码文件到提交 `97d3d51` 对应版本；本轮未修改数据库结构。
+
+## 2026-07-13 - Task: 兼容状态接口缺少配额换算单位
+
+### What was done
+
+- New API 状态接口返回有效 `quota_per_unit` 时继续使用上游值；字段缺失或无效时，按 New API 标准单位 `500000 quota = 1 USD` 换算。
+- 导入和用量同步统一使用同一换算单位解析逻辑，恢复生产环境非零 `used_quota` 的美元显示。
+
+### Testing
+
+- `npm test`：通过；22 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功。
+- 缺失字段回归：模拟 `/api/status` 不返回 `quota_per_unit`，渠道 `used_quota=250000`，本地记录正确保存 `usedUsd=0.5`。
+- `ReadLints`：检查服务层、客户端、存储层和路由测试，无诊断错误。
+
+### Notes
+
+- `lib/instance-service.js`：统一解析换算单位并增加 New API 标准值 fallback。
+- `test/instance-route.test.js`：覆盖状态接口缺少换算单位时的导入用量换算。
+- `docs/nextjs-usage.md`：说明换算单位缺失时的处理规则。
+- `progress.md`：记录本轮修复和验证结果。
+- 回滚方式：恢复上述代码、测试和文档到提交 `d3220ec` 对应版本；本轮未修改数据库结构。

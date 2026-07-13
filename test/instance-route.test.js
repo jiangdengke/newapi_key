@@ -74,7 +74,6 @@ function createMockNewApiServer(createdChannelRequests, storedChannels) {
         data: {
           system_name: "Mock New API",
           version: "test-version",
-          quota_per_unit: 500_000,
         },
       });
       return;
@@ -263,6 +262,8 @@ test("instance import route streams safe per-key results", async () => {
     assert.equal(importedRecords.length, 1);
     assert.equal(importedRecords[0].channelName, "claude-0711-107");
     assert.equal(importedRecords[0].keyMask.includes(IMPORT_KEYS[0]), false);
+    assert.equal(importedRecords[0].usedQuota, 250_000);
+    assert.equal(importedRecords[0].usedUsd, 0.5);
   } finally {
     restoreRuntimeContext();
     store.close();
