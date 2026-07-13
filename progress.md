@@ -829,3 +829,23 @@
 - `test/application-store.test.js`：更新 schema 迁移版本断言。
 - `docs/nextjs-usage.md`：说明余额与累计用量的来源、含义和旧记录升级行为。
 - 回滚方式：先停止服务并备份 SQLite，再恢复上述代码和文档；数据库如需回到 schema 4，应从本轮变更前的 SQLite 备份恢复，不能直接删除 `balance_usd` 列。
+
+## 2026-07-13 - Task: 修复 New API 累计用量换算为零
+
+### What was done
+
+- 兼容 `/api/status` 将 `quota_per_unit` 放在响应顶层或 `data` 内的两种返回结构，确保 `used_quota` 能按正确单位换算。
+- 当上游累计配额非零但换算单位无效时改为明确报错，不再静默保存为 `$0.00`。
+
+### Testing
+
+- `npm test`：通过；22 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功。
+- `ReadLints`：检查 New API 客户端和应用存储，无诊断错误。
+
+### Notes
+
+- `lib/new-api-client.js`：合并 New API 状态响应顶层与 `data` 字段。
+- `lib/application-store.js`：阻止非零 `used_quota` 在无效换算单位下被静默归零。
+- `progress.md`：记录本轮修复和验证结果。
+- 回滚方式：恢复上述两个代码文件到提交 `97d3d51` 对应版本；本轮未修改数据库结构。
