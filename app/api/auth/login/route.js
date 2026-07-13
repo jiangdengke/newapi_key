@@ -19,6 +19,7 @@ const LOGIN_WINDOW_MILLISECONDS = 15 * 60 * 1_000;
 export async function POST(request) {
   const requestId = createRequestId(request);
   const context = getRuntimeContext();
+  const startedAt = Date.now();
   try {
     requireSameOrigin(request);
     const loginInput = validateLoginInput(await readJsonBody(request));
@@ -51,9 +52,10 @@ export async function POST(request) {
         expiresAt: currentTime + LOGIN_WINDOW_MILLISECONDS,
       });
       context.logger.warn("application_login_failed", {
-        requestId,
         username: loginInput.username,
         failedCount,
+        durationMilliseconds: Date.now() - startedAt,
+        requestId,
       });
       return jsonResponse({ success: false, message: "用户名或密码错误" }, {
         status: 401,
@@ -65,8 +67,10 @@ export async function POST(request) {
     context.store.deleteSession(getSessionToken(request));
     const session = context.store.createAdministratorSession(administrator.id);
     context.logger.info("application_login_succeeded", {
-      requestId,
+      username: administrator.username,
+      durationMilliseconds: Date.now() - startedAt,
       administratorId: administrator.id,
+      requestId,
     });
     return jsonResponse({ success: true, data: { principal: administrator } }, {
       requestId,

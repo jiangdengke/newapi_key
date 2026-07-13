@@ -43,6 +43,7 @@ LOG_LEVEL=info
 - `BOOTSTRAP_ADMIN_PASSWORD` 至少 10 个字符，只在数据库中没有管理员时用于初始化账号。
 - `CREDENTIAL_ENCRYPTION_KEY` 用于加密 New API 管理员密码，投入使用后不能更换。
 - HTTP 访问时使用 `SESSION_COOKIE_SECURE=false`；HTTPS 生效后改为 `true`。
+- `LOG_LEVEL` 控制中文单行业务日志级别，可选 `debug`、`info`、`warn` 或 `error`。
 - `.env` 包含敏感信息，不要提交到 Git。
 
 ## Docker Compose 部署

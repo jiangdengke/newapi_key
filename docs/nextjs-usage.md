@@ -107,7 +107,13 @@ docker compose down
 
 ## 日志和验证
 
-日志以单行 JSON 写入标准输出和标准错误。API 响应包含 `X-Request-Id`，页面错误会显示同一请求 ID。日志不会主动记录请求体、完整 Key、Key 指纹、Cookie、认证头或明文密码。
+日志以“时间、级别、中文事件、`key=value` 字段”的单行格式写入标准输出和标准错误，耗时会自动显示为毫秒或秒。API 响应包含 `X-Request-Id`，页面错误会显示同一请求 ID，日志中的 `request` 字段可用于关联请求。日志不会主动记录请求体、完整 Key、Key 指纹、Cookie、认证头或明文密码。
+
+```text
+2026-07-13 02:15:24 INFO  导入完成 instance=3 total=10 success=8 failure=2 duration=1.6s
+2026-07-13 02:15:25 INFO  用量同步完成 instance=3 synced=8 missing=1 duration=420ms
+2026-07-13 02:15:26 WARN  New API 请求限流 operation=search_channels status=429
+```
 
 - 本地验证后仍回到入口页：确认本地 HTTP 使用 `SESSION_COOKIE_SECURE=false`。
 - 旧渠道被归入“待配置旧实例”：管理员补全该实例的 New API 管理员凭据并启用，再生成访问 Key。
