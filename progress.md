@@ -804,3 +804,28 @@
 - `test/logger.test.js`：改为验证中文单行日志、字段别名、耗时和脱敏行为。
 - `progress.md`：追加本轮实现与验证记录。
 - 回滚方式：恢复 `lib/logger.js` 的 JSON 序列化输出、还原底层请求日志级别和实例服务日志字段，并恢复相关文档及日志测试；本轮未修改数据库结构。
+
+## 2026-07-13 - Task: 同时显示渠道余额与累计用量
+
+### What was done
+
+- 为本地渠道记录增加余额字段，导入和同步时保存 New API 返回的 `balance`，并通过现有查询接口返回余额及累计用量汇总。
+- 实例工作区和管理端记录总览分别显示渠道余额与累计用量，避免将余额误认为累计消耗。
+- 将 SQLite schema 升级到版本 5；既有记录的余额默认从 `$0.00` 开始，下一次同步后更新。
+
+### Testing
+
+- `npm test`：通过；22 项测试全部通过，覆盖 schema 迁移、授权、导入、记录查询和删除回归。
+- `npm run build`：通过；Next.js 生产构建成功，两个记录列表和全部 Route Handler 完成编译。
+- 定向内存 SQLite 验证：导入余额 `$12.50` 后同步为 `$10.25`，累计用量同步为 `$1.50`，单条记录和汇总结果一致。
+- `ReadLints`：已检查应用存储、两个记录列表组件和应用存储测试，未发现诊断错误。
+- 未访问真实 New API；本轮只修改本地数据库结构、同步存储和展示逻辑。
+
+### Notes
+
+- `lib/application-store.js`：新增 `balance_usd` 字段、schema 5 迁移、余额读写和余额汇总。
+- `components/instance-workspace.js`：实例记录列表和摘要同时显示余额与累计用量。
+- `components/admin-records-overview.js`：管理员记录列表和摘要同时显示余额与累计用量。
+- `test/application-store.test.js`：更新 schema 迁移版本断言。
+- `docs/nextjs-usage.md`：说明余额与累计用量的来源、含义和旧记录升级行为。
+- 回滚方式：先停止服务并备份 SQLite，再恢复上述代码和文档；数据库如需回到 schema 4，应从本轮变更前的 SQLite 备份恢复，不能直接删除 `balance_usd` 列。

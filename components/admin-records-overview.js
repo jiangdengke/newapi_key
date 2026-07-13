@@ -25,6 +25,7 @@ function createEmptyRecordData() {
     pageSize: DEFAULT_PAGE_SIZE,
     total: 0,
     totalPages: 1,
+    totalBalanceUsd: 0,
     totalUsedUsd: 0,
   };
 }
@@ -89,7 +90,9 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
       setRecordData(loadedRecordData);
       setSelectedRecordIds([]);
       setMessage(
-        `共 ${loadedRecordData.total} 条记录，累计用量 `
+        `共 ${loadedRecordData.total} 条记录，余额 `
+        + formatUsd(loadedRecordData.totalBalanceUsd)
+        + "，累计用量 "
         + formatUsd(loadedRecordData.totalUsedUsd),
       );
     } catch (error) {
@@ -309,6 +312,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
               <th>渠道</th>
               <th>Key</th>
               <th>状态</th>
+              <th>余额</th>
               <th>累计用量</th>
               <th>导入时间</th>
               <th>最后同步</th>
@@ -375,6 +379,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
                     {getStatusText(record.statusLabel)}
                   </span>
                 </td>
+                <td className="history-usage">{formatUsd(record.balanceUsd)}</td>
                 <td className="history-usage">{formatUsd(record.usedUsd)}</td>
                 <td>{formatDateTime(record.importedAt, "未知时间")}</td>
                 <td>{formatDateTime(record.lastSyncedAt, "尚未同步")}</td>
@@ -400,7 +405,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
               </tr>
             ))}
             {!isLoading && recordData.records.length === 0 ? (
-              <tr><td className="history-empty" colSpan="9">没有符合条件的 Key 记录。</td></tr>
+              <tr><td className="history-empty" colSpan="10">没有符合条件的 Key 记录。</td></tr>
             ) : null}
           </tbody>
         </table>

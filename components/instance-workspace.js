@@ -108,7 +108,9 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     });
     setHistoryData(responsePayload.data);
     setHistoryMessage(
-      `共 ${responsePayload.data.total} 条本地记录，累计用量 `
+      `共 ${responsePayload.data.total} 条本地记录，余额 `
+      + formatUsd(responsePayload.data.totalBalanceUsd)
+      + "，累计用量 "
       + formatUsd(responsePayload.data.totalUsedUsd),
     );
     return responsePayload.data;
@@ -133,7 +135,9 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       setConfiguration(configurationPayload.data);
       setHistoryData(historyPayload.data);
       setHistoryMessage(
-        `共 ${historyPayload.data.total} 条本地记录，累计用量 `
+        `共 ${historyPayload.data.total} 条本地记录，余额 `
+        + formatUsd(historyPayload.data.totalBalanceUsd)
+        + "，累计用量 "
         + formatUsd(historyPayload.data.totalUsedUsd),
       );
     }).catch((error) => {
@@ -335,7 +339,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
 
   async function synchronizeHistory() {
     setIsSynchronizing(true);
-    setHistoryMessage("正在从 New API 同步渠道状态和用量...");
+    setHistoryMessage("正在从 New API 同步渠道状态、余额和用量...");
     try {
       const responsePayload = await requestJson(
         `/api/instances/${instanceId}/records/sync`,
@@ -438,7 +442,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
         <div className="history-header">
           <div><h2>已导入渠道</h2><p>{historyMessage}</p></div>
           <button className="button button-secondary" type="button" disabled={!instance.enabled || isImporting || isSynchronizing} onClick={synchronizeHistory}>
-            {isSynchronizing ? "正在同步..." : "刷新渠道用量"}
+            {isSynchronizing ? "正在同步..." : "刷新余额和用量"}
           </button>
         </div>
         <form className="history-search-form" autoComplete="off" onSubmit={submitHistorySearch}>
@@ -448,19 +452,20 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
         </form>
         <div className="history-table-shell">
           <table className="history-table">
-            <thead><tr><th>渠道</th><th>Key</th><th>状态</th><th>累计用量</th><th>导入时间</th><th>最后同步</th></tr></thead>
+            <thead><tr><th>渠道</th><th>Key</th><th>状态</th><th>余额</th><th>累计用量</th><th>导入时间</th><th>最后同步</th></tr></thead>
             <tbody>
               {historyData.records.map((record) => (
                 <tr key={record.id}>
                   <td><strong>{record.channelName}</strong><small>ID {record.newApiChannelId} · {record.group}</small></td>
                   <td className="history-key">{record.keyMask}</td>
                   <td><span className={`history-status history-status-${record.statusLabel}`}>{getStatusText(record.statusLabel)}</span></td>
+                  <td className="history-usage">{formatUsd(record.balanceUsd)}</td>
                   <td className="history-usage">{formatUsd(record.usedUsd)}</td>
                   <td>{formatDateTime(record.importedAt)}</td>
                   <td>{formatDateTime(record.lastSyncedAt)}</td>
                 </tr>
               ))}
-              {historyData.records.length === 0 ? <tr><td className="history-empty" colSpan="6">{historyQuery.key ? "没有找到该 Key 对应的渠道。" : "暂时没有通过本工具导入的渠道。"}</td></tr> : null}
+              {historyData.records.length === 0 ? <tr><td className="history-empty" colSpan="7">{historyQuery.key ? "没有找到该 Key 对应的渠道。" : "暂时没有通过本工具导入的渠道。"}</td></tr> : null}
             </tbody>
           </table>
         </div>
