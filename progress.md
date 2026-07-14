@@ -1109,3 +1109,92 @@
 - `docs/nextjs-usage.md`：说明管理员修改密码的入口、规则和会话影响。
 - `progress.md`：追加本轮实现、验证证据和回滚点。
 - 回滚方式：恢复上述九个文件到本轮开始前版本；本轮未修改 SQLite schema，自动化测试仅使用内存数据库，未修改正式管理员密码。
+
+## 2026-07-11 - Task: 增加 OpenAI 渠道导入与同步
+
+### What was done
+
+- 在保留 Claude 渠道的基础上，为同一实例工作区增加独立 OpenAI Key 输入区；OpenAI 固定使用官方 Key、`gpt-5.6-sol` 模型和 `openai` 分组。
+- 标准 New API 使用类型 `1` 创建 OpenAI 渠道；Admin Hub 使用 `platform_channel_type=openai`、`model_series=openai.gpt` 并发布到实例选定站点。
+- Claude 与 OpenAI 继续使用实例配置的名称前缀和日期模式，共享现有渠道序号避让；两类渠道均进入本地加密 Key 历史并参与状态、余额和用量同步。
+- 同步更新项目说明和使用文档，明确两种连接协议均支持 Claude 与 OpenAI，且不提供自定义 OpenAI 兼容接口 Base URL。
+
+### Testing
+
+- `node --test "test/validation.test.js" "test/instance-route.test.js" "test/synchronization.test.js" "test/admin-sync-route.test.js"`：通过；15 项定向测试全部通过，覆盖渠道类型校验、两种协议的 OpenAI 创建、共享序号和混合渠道同步。
+- `npm test`：通过；39 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功，导入路由和页面组件正常编译。
+- `ReadLints`：检查本轮 JavaScript 改动，未发现诊断错误。
+- `git diff --check`：通过。
+- 未连接真实 New API 或 Deepnix 实例，未创建、修改或删除真实渠道；Admin Hub OpenAI 请求结构依据公开前端映射并由本地模拟协议测试验证。
+
+### Notes
+
+- `app/api/instances/[instanceId]/import/route.js`：接收并传递 Claude 或 OpenAI 渠道类型。
+- `components/instance-workspace.js`：增加相互独立的 Claude、OpenAI Key 导入表单和结果反馈。
+- `lib/validation.js`：增加渠道类型、OpenAI 类型编号和固定模型校验。
+- `lib/new-api-client.js`：将标准 New API 渠道搜索、创建和命名查询泛化为 Claude 与 OpenAI 共用能力。
+- `lib/admin-hub-client.js`：将 Admin Hub 渠道搜索与创建泛化，并支持 OpenAI 模板字段和站点分组。
+- `lib/instance-service.js`：按渠道类型编排创建参数，并让混合渠道共用序号和同步流程。
+- `test/admin-sync-route.test.js`：同步模拟客户端改用通用渠道查询接口。
+- `test/instance-route.test.js`：增加标准 New API 与 Admin Hub 的 OpenAI 创建、存储和同步集成测试。
+- `test/synchronization.test.js`：同步并发测试改用通用渠道查询接口。
+- `test/validation.test.js`：增加 OpenAI 渠道类型输入校验测试。
+- `package.json`：更新项目描述以包含官方 OpenAI Key。
+- `README.md`：补充 Claude 与 OpenAI 双渠道能力概览。
+- `docs/nextjs-usage.md`：补充 OpenAI 模型、分组、命名、协议字段和使用限制。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚方式：执行 `git restore --source=6a01cd1 -- "app/api/instances/[instanceId]/import/route.js" "components/instance-workspace.js" "lib/admin-hub-client.js" "lib/instance-service.js" "lib/new-api-client.js" "lib/validation.js" "test/admin-sync-route.test.js" "test/instance-route.test.js" "test/synchronization.test.js" "test/validation.test.js" "package.json" "README.md" "docs/nextjs-usage.md" "progress.md"`；本轮未修改 SQLite schema，自动化测试仅使用内存数据库。
+
+## 2026-07-14 - Task: 精简渠道分组配置并合并导入面板
+
+### What was done
+
+- 管理端新增、编辑实例时不再显示渠道分组，实例卡片也不再展示历史分组值；保存实例时继续写入兼容用的 `anthropic` 默认值。
+- 渠道创建不再依赖实例中保存的分组：Claude 固定使用 `anthropic`，OpenAI 固定使用 `openai`，旧实例的历史分组配置不会影响新建渠道。
+- 将上下排列的 Claude、OpenAI 导入区域合并为同一个面板，通过两个并列按钮切换当前导入类型；两个类型尚未提交的 Key 内容分别保留。
+- 更新使用说明，明确分组自动确定和导入类型切换行为。
+
+### Testing
+
+- `node --test "test/instance-route.test.js" "test/validation.test.js"`：通过；11 项定向测试全部通过，并验证旧实例保存自定义分组时 Claude 仍使用 `anthropic`。
+- `npm test`：通过；39 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功，合并后的导入面板正常编译。
+- `ReadLints`：检查本轮 JavaScript 和样式改动，未发现诊断错误。
+- `git diff --check`：通过。
+- 未连接真实 New API 或 Deepnix 实例，未创建、修改或删除真实渠道。
+
+### Notes
+
+- `app/globals.css`：增加 Claude、OpenAI 并列切换按钮样式。
+- `components/admin-dashboard.js`：隐藏渠道分组编辑和展示，并在保存时写入兼容默认值。
+- `components/instance-workspace.js`：将两个导入表单合并为可切换的单一面板，并分别保留两类 Key 输入。
+- `lib/instance-service.js`：按渠道类型固定 Claude 与 OpenAI 的创建分组。
+- `test/instance-route.test.js`：验证实例历史分组不会覆盖 Claude 固定分组。
+- `README.md`：补充分组自动确定和导入面板切换能力。
+- `docs/nextjs-usage.md`：更新实例配置、分组规则和导入面板操作说明。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚点：本轮用户提出“隐藏渠道分组并将 Claude/OpenAI 改为按钮切换”之前的未提交 OpenAI 适配工作区状态；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-14 - Task: 禁止在实例编辑中修改上游管理员密码
+
+### What was done
+
+- New API 或 Admin Hub 管理员密码仅在新建实例时填写，编辑实例时不再显示上游密码输入框。
+- 编辑实例、加载 Admin Hub 站点和保存配置时继续复用数据库中已加密保存的原上游密码，不会修改上游账号密码或本地保存的连接密码。
+- 平台自身管理员密码仍通过管理端右上角“修改密码”独立管理。
+
+### Testing
+
+- `npm test`：通过；39 项测试全部通过，既有实例编辑留空密码复用和管理员密码修改行为保持正常。
+- `npm run build`：通过；Next.js 生产构建成功，实例新建和编辑界面正常编译。
+- `ReadLints`：检查本轮界面和文档改动，未发现诊断错误。
+- `git diff --check`：通过。
+- 未连接或修改真实 New API、Admin Hub 账号密码，也未修改平台正式管理员密码。
+
+### Notes
+
+- `components/admin-dashboard.js`：上游密码输入框仅在新建实例时显示，编辑实例不再提供修改入口。
+- `docs/nextjs-usage.md`：说明上游管理员密码的填写时机和编辑实例时的复用行为。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚点：本轮用户提出“只允许修改平台管理员密码”之前的未提交工作区状态；本轮未修改 SQLite schema 或正式数据。

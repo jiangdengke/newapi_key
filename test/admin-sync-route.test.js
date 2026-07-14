@@ -113,7 +113,7 @@ test("administrator sync route authorizes callers and skips ineligible instances
             async login() {
               return { id: 1, username: "enabled-instance-administrator" };
             },
-            async searchAnthropicChannelByName(channelName) {
+            async searchChannelByName(channelName) {
               synchronizedSearchCount += 1;
               return {
                 id: 101,

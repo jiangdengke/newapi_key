@@ -23,7 +23,12 @@ export async function POST(request, { params }) {
       throw new HttpError(409, "该 New API 实例已停用");
     }
     const requestBody = await readJsonBody(request);
-    const channelImport = prepareChannelImport(instanceId, requestBody?.keys, requestId);
+    const channelImport = prepareChannelImport(
+      instanceId,
+      requestBody?.keys,
+      requestId,
+      requestBody?.channelKind,
+    );
     const eventIterator = channelImport.events();
     const textEncoder = new TextEncoder();
     const responseStream = new ReadableStream({

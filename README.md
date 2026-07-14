@@ -1,16 +1,19 @@
 # New API Key 管理系统
 
-基于 Next.js 的 New API 多实例 Anthropic Key 管理工具。管理员可以维护多个 New API 实例，为每个实例生成独立访问 Key；使用者通过访问 Key 进入指定实例，批量创建 Claude 渠道、查询本地导入历史并同步渠道状态与用量。
+基于 Next.js 的 New API 多实例 Claude 与 OpenAI Key 管理工具。管理员可以维护多个 New API 实例，为每个实例生成独立访问 Key；使用者通过访问 Key 进入指定实例，分别批量创建 Claude 或 OpenAI 渠道、查询本地导入历史并同步渠道状态与用量。
 
 ## 主要能力
 
 - 多个 New API 实例统一管理。
 - 每个实例使用独立访问 Key，访客会话仅能访问绑定实例。
-- 批量导入 Anthropic Key，并按 `claude-MMDD-序号` 或 `claude-序号` 创建渠道。
-- 固定支持 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`。
+- 分别批量导入 Anthropic Key 和官方 OpenAI Key，并按实例配置的前缀、日期模式和共享序号创建渠道。
+- Claude 固定支持 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`；OpenAI 固定支持 `gpt-5.6-sol`。
+- Claude 固定使用 `anthropic` 分组，OpenAI 固定使用 `openai` 分组，无需手工配置渠道分组。
+- Claude 与 OpenAI 通过同一导入面板中的并列按钮切换，未提交的输入内容分别保留。
+- 标准 New API 和 Deepnix Admin Hub 两种连接协议均支持 Claude 与 OpenAI 渠道。
 - 支持实例级渠道优先级和权重。
 - SQLite 保存实例配置、访问会话和脱敏渠道历史。
-- 完整 Anthropic Key 不落库，仅保存掩码和 SHA-256 指纹。
+- 完整导入 Key 使用 AES-256-GCM 加密保存，同时保存掩码和 SHA-256 指纹。
 - 支持 Docker Compose 部署。
 
 ## 环境要求

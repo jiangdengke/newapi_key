@@ -1153,3 +1153,37 @@ textarea:focus {
     flex-direction: column;
   }
 }
+
+.channel-kind-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 22px;
+  padding: 5px;
+  border: 1px solid #d6dce8;
+  border-radius: 12px;
+  background: #f3f5f9;
+}
+
+.channel-kind-option {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #5b667d;
+  background: transparent;
+  font-weight: 750;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.channel-kind-option:not(:disabled):hover {
+  color: var(--primary-dark);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.channel-kind-option.active {
+  border-color: #cbd7f8;
+  color: var(--primary-dark);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(53, 104, 232, 0.12);
+}

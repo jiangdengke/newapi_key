@@ -13,7 +13,6 @@ const EMPTY_INSTANCE_FORM = Object.freeze({
   password: "",
   connectionProtocol: "new-api",
   adminHubTargetSiteId: "",
-  group: "anthropic",
   namePrefix: "claude",
   startNumber: "1",
   continueFromExisting: true,
@@ -33,7 +32,6 @@ function createInstanceFormFromInstance(instance) {
     adminHubTargetSiteId: instance.adminHubTargetSiteId === null
       ? ""
       : String(instance.adminHubTargetSiteId),
-    group: instance.group,
     namePrefix: instance.namePrefix,
     startNumber: String(instance.startNumber),
     continueFromExisting: instance.continueFromExisting,
@@ -47,6 +45,7 @@ function createInstanceFormFromInstance(instance) {
 function createInstanceRequestBody(instanceForm) {
   return {
     ...instanceForm,
+    group: "anthropic",
     startNumber: Number(instanceForm.startNumber),
     priority: Number(instanceForm.priority),
     weight: Number(instanceForm.weight),
@@ -124,14 +123,12 @@ function InstanceFormFields({
           <span>管理员用户名</span>
           <input value={instanceForm.username} onChange={(event) => onChange("username", event.target.value)} required />
         </label>
-        <label className="field">
-          <span>{isEditing ? "更新管理员密码（留空保持不变）" : "管理员密码"}</span>
-          <input type="password" autoComplete="new-password" value={instanceForm.password} onChange={(event) => onChange("password", event.target.value)} required={!isEditing} />
-        </label>
-        <label className="field">
-          <span>渠道分组</span>
-          <input value={instanceForm.group} onChange={(event) => onChange("group", event.target.value)} required />
-        </label>
+        {!isEditing ? (
+          <label className="field">
+            <span>New API 管理员密码</span>
+            <input type="password" autoComplete="new-password" value={instanceForm.password} onChange={(event) => onChange("password", event.target.value)} required />
+          </label>
+        ) : null}
         <label className="field">
           <span>名称前缀</span>
           <input value={instanceForm.namePrefix} onChange={(event) => onChange("namePrefix", event.target.value)} required />
@@ -542,7 +539,6 @@ export default function AdminDashboard({ onOpenInstance }) {
                       序号
                     </dd>
                   </div>
-                  <div><dt>分组</dt><dd>{instance.group}</dd></div>
                   <div><dt>优先级</dt><dd>{instance.priority}</dd></div>
                   <div><dt>权重</dt><dd>{instance.weight}</dd></div>
                   <div>

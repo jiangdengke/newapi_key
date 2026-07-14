@@ -8,6 +8,8 @@ import { showToast } from "../lib/toast.js";
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS = 30_000;
+const CLAUDE_CHANNEL_KIND = "claude";
+const OPENAI_CHANNEL_KIND = "openai";
 
 function createInitialProgress() {
   return {
@@ -67,7 +69,9 @@ function getStatusText(statusLabel) {
 
 export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   const [configuration, setConfiguration] = useState(null);
-  const [keysText, setKeysText] = useState("");
+  const [claudeKeysText, setClaudeKeysText] = useState("");
+  const [openAiKeysText, setOpenAiKeysText] = useState("");
+  const [selectedChannelKind, setSelectedChannelKind] = useState(CLAUDE_CHANNEL_KIND);
   const [progress, setProgress] = useState(createInitialProgress);
   const [isImporting, setIsImporting] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
@@ -91,7 +95,14 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   const [pageError, setPageError] = useState("");
   const synchronizationInProgressRef = useRef(false);
   const automaticSynchronizationRef = useRef(null);
-  const uniqueKeys = useMemo(() => normalizeKeyLines(keysText), [keysText]);
+  const uniqueClaudeKeys = useMemo(
+    () => normalizeKeyLines(claudeKeysText),
+    [claudeKeysText],
+  );
+  const uniqueOpenAiKeys = useMemo(
+    () => normalizeKeyLines(openAiKeysText),
+    [openAiKeysText],
+  );
 
   async function loadConfiguration() {
     const responsePayload = await requestJson(`/api/instances/${instanceId}/config`);
@@ -159,9 +170,15 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
 
   function processProgressEvent(event, successfulKeyIndexes) {
     if (event.type === "ready") {
+      const channelKindLabel = event.channelKind === OPENAI_CHANNEL_KIND
+        ? "OpenAI"
+        : "Claude";
       setProgress((current) => ({
         ...current,
-        summary: `已连接 ${event.systemName} ${event.version}，开始创建 ${event.total} 个渠道`,
+        summary: (
+          `已连接 ${event.systemName} ${event.version}，`
+          + `开始创建 ${event.total} 个 ${channelKindLabel} 渠道`
+        ),
       }));
       return;
     }
@@ -221,10 +238,14 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     }
   }
 
-  async function importChannels(event) {
+  async function importChannels(event, channelKind) {
     event.preventDefault();
+    const isOpenAiImport = channelKind === OPENAI_CHANNEL_KIND;
+    const uniqueKeys = isOpenAiImport ? uniqueOpenAiKeys : uniqueClaudeKeys;
+    const setKeysText = isOpenAiImport ? setOpenAiKeysText : setClaudeKeysText;
+    const channelKindLabel = isOpenAiImport ? "OpenAI" : "Claude";
     if (uniqueKeys.length === 0) {
-      const errorMessage = "请至少填写一个 Key";
+      const errorMessage = `请至少填写一个 ${channelKindLabel} Key`;
       setPageError(errorMessage);
       showToast(errorMessage, { type: "error" });
       return;
@@ -233,7 +254,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     setIsImporting(true);
     setProgress({
       ...createInitialProgress(),
-      summary: "正在登录并查询同前缀渠道...",
+      summary: `正在为 ${channelKindLabel} 导入查询同前缀渠道...`,
       total: uniqueKeys.length,
     });
     const successfulKeyIndexes = new Set();
@@ -241,7 +262,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       const response = await fetch(`/api/instances/${instanceId}/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keys: uniqueKeys }),
+        body: JSON.stringify({ keys: uniqueKeys, channelKind }),
       });
       if (!response.ok || !response.body) {
         await readJsonResponse(response);
@@ -408,6 +429,10 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   }
 
   const instance = configuration.instance;
+  const isOpenAiSelected = selectedChannelKind === OPENAI_CHANNEL_KIND;
+  const selectedChannelLabel = isOpenAiSelected ? "OpenAI" : "Claude";
+  const selectedKeysText = isOpenAiSelected ? openAiKeysText : claudeKeysText;
+  const selectedUniqueKeys = isOpenAiSelected ? uniqueOpenAiKeys : uniqueClaudeKeys;
   const progressPercentage = progress.total > 0
     ? Math.round((progress.completed / progress.total) * 100)
     : 0;
@@ -428,24 +453,67 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
 
       {pageError ? <p className="form-error panel-message">{pageError}</p> : null}
 
-      <form onSubmit={importChannels} autoComplete="off">
+      <form
+        onSubmit={(event) => importChannels(event, selectedChannelKind)}
+        autoComplete="off"
+      >
         <section className="panel">
+          <div className="channel-kind-switch" aria-label="选择导入渠道类型">
+            <button
+              className={`channel-kind-option ${!isOpenAiSelected ? "active" : ""}`}
+              type="button"
+              aria-pressed={!isOpenAiSelected}
+              disabled={isImporting}
+              onClick={() => setSelectedChannelKind(CLAUDE_CHANNEL_KIND)}
+            >
+              Claude 渠道
+            </button>
+            <button
+              className={`channel-kind-option ${isOpenAiSelected ? "active" : ""}`}
+              type="button"
+              aria-pressed={isOpenAiSelected}
+              disabled={isImporting}
+              onClick={() => setSelectedChannelKind(OPENAI_CHANNEL_KIND)}
+            >
+              OpenAI 渠道
+            </button>
+          </div>
+          <div className="panel-heading">
+            <div>
+              <h2>导入 {selectedChannelLabel} 渠道</h2>
+              <p>
+                {isOpenAiSelected
+                  ? "使用官方 OpenAI Key，固定模型为 gpt-5.6-sol，分组为 openai。"
+                  : "使用 Anthropic Key，固定创建现有三个 Claude Opus 模型，分组为 anthropic。"}
+              </p>
+            </div>
+          </div>
           <label className="field">
-            <span>Anthropic Key</span>
+            <span>{isOpenAiSelected ? "OpenAI Key" : "Anthropic Key"}</span>
             <textarea
               rows="7"
-              placeholder="每行粘贴一个 Key"
+              placeholder={isOpenAiSelected
+                ? "每行粘贴一个官方 OpenAI Key"
+                : "每行粘贴一个 Anthropic Key"}
               spellCheck="false"
-              value={keysText}
-              onChange={(event) => setKeysText(event.target.value)}
+              value={selectedKeysText}
+              onChange={(event) => {
+                if (isOpenAiSelected) {
+                  setOpenAiKeysText(event.target.value);
+                } else {
+                  setClaudeKeysText(event.target.value);
+                }
+              }}
               disabled={!instance.enabled || isImporting}
               required
             />
           </label>
-          <div className="key-summary"><span>共 {uniqueKeys.length} 个有效 Key</span></div>
+          <div className="key-summary">
+            <span>共 {selectedUniqueKeys.length} 个有效 {selectedChannelLabel} Key</span>
+          </div>
           <div className="submit-row">
             <button className="button button-primary" disabled={!instance.enabled || isImporting}>
-              {isImporting ? "正在创建..." : "开始创建渠道"}
+              {isImporting ? "正在创建..." : `开始创建 ${selectedChannelLabel} 渠道`}
             </button>
           </div>
         </section>

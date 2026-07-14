@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Import Anthropic keys into New API channels with sequential names.",
+  "description": "Import Anthropic and official OpenAI keys into sequential New API channels.",
   "scripts": {
     "build": "next build && node prepare-standalone.js",
     "start": "APPLICATION_ROOT_PATH=\"$PWD\" HOSTNAME=127.0.0.1 PORT=4173 node .next/standalone/server.js",

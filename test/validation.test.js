@@ -64,6 +64,30 @@ test("validateImportInput rejects an invalid date segment", () => {
   );
 });
 
+test("validateImportInput accepts OpenAI and rejects unsupported channel kinds", () => {
+  const openAiImportInput = validateImportInput({
+    keys: ["sk-openai-example"],
+    channelKind: "openai",
+    namePrefix: "channel",
+    dateSegment: "0714",
+    startNumber: 1,
+    group: "openai",
+  });
+  assert.equal(openAiImportInput.channelKind, "openai");
+
+  assert.throws(
+    () => validateImportInput({
+      keys: ["sk-example"],
+      channelKind: "unsupported",
+      namePrefix: "channel",
+      dateSegment: "0714",
+      startNumber: 1,
+      group: "openai",
+    }),
+    (error) => error instanceof ValidationError && /claude 或 openai/.test(error.message),
+  );
+});
+
 test("validateChannelDefaults accepts fixed, automatic, and empty date modes", () => {
   assert.deepEqual(
     validateChannelDefaults({

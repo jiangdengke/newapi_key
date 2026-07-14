@@ -75,7 +75,7 @@ test("record synchronization limits searches and coalesces overlapping requests"
         async login() {
           return { id: 1, username: "new-api-administrator" };
         },
-        async searchAnthropicChannelByName(channelName) {
+        async searchChannelByName(channelName) {
           totalSearchCount += 1;
           activeSearchCount += 1;
           maximumActiveSearchCount = Math.max(
