@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { validateInstanceInput } from "../lib/admin-validation.js";
+import {
+  validateAdministratorPasswordChangeInput,
+  validateInstanceInput,
+} from "../lib/admin-validation.js";
 
 function createValidInstanceInput(overrides = {}) {
   return {
@@ -69,4 +72,32 @@ test("instance validation permits an unchanged password while editing", () => {
 
   assert.equal(instanceInput.password, "");
   assert.equal(instanceInput.adminHubTargetSiteId, 13);
+});
+
+test("administrator password validation requires matching passwords of sufficient length", () => {
+  assert.deepEqual(validateAdministratorPasswordChangeInput({
+    currentPassword: "administrator-password",
+    newPassword: "updated-administrator-password",
+    confirmPassword: "updated-administrator-password",
+  }), {
+    currentPassword: "administrator-password",
+    newPassword: "updated-administrator-password",
+  });
+
+  assert.throws(
+    () => validateAdministratorPasswordChangeInput({
+      currentPassword: "administrator-password",
+      newPassword: "short",
+      confirmPassword: "short",
+    }),
+    /至少需要 10 个字符/,
+  );
+  assert.throws(
+    () => validateAdministratorPasswordChangeInput({
+      currentPassword: "administrator-password",
+      newPassword: "updated-administrator-password",
+      confirmPassword: "different-administrator-password",
+    }),
+    /两次输入的新密码不一致/,
+  );
 });

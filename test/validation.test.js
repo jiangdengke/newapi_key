@@ -34,6 +34,23 @@ test("buildSequentialChannelNames continues after the highest existing sequence"
   ]);
 });
 
+test("buildSequentialChannelNames supports names without a date segment", () => {
+  const generatedNames = buildSequentialChannelNames({
+    existingNames: ["claude-003", "claude-106", "claude-0711-999"],
+    keyCount: 3,
+    namePrefix: "claude",
+    dateSegment: "",
+    startNumber: 1,
+    continueFromExisting: true,
+  });
+
+  assert.deepEqual(generatedNames, [
+    "claude-107",
+    "claude-108",
+    "claude-109",
+  ]);
+});
+
 test("validateImportInput rejects an invalid date segment", () => {
   assert.throws(
     () => validateImportInput({
@@ -47,7 +64,7 @@ test("validateImportInput rejects an invalid date segment", () => {
   );
 });
 
-test("validateChannelDefaults accepts fixed and automatic date modes", () => {
+test("validateChannelDefaults accepts fixed, automatic, and empty date modes", () => {
   assert.deepEqual(
     validateChannelDefaults({
       group: "anthropic",
@@ -71,6 +88,10 @@ test("validateChannelDefaults accepts fixed and automatic date modes", () => {
   const automaticDefaults = validateChannelDefaults({ dateMode: "auto" });
   assert.equal(automaticDefaults.dateMode, "auto");
   assert.match(automaticDefaults.dateSegment, /^\d{4}$/);
+
+  const noDateDefaults = validateChannelDefaults({ dateMode: "" });
+  assert.equal(noDateDefaults.dateMode, "");
+  assert.equal(noDateDefaults.dateSegment, "");
 });
 
 test("channel priority and weight accept safe integer values", () => {
@@ -101,7 +122,7 @@ test("validateChannelDefaults rejects invalid environment values", () => {
   );
   assert.throws(
     () => validateChannelDefaults({ dateMode: "today" }),
-    (error) => error instanceof ValidationError && /auto 或 4 位日期段/.test(error.message),
+    (error) => error instanceof ValidationError && /留空、填写 auto/.test(error.message),
   );
   assert.throws(
     () => validateChannelDefaults({ priority: "1.5" }),

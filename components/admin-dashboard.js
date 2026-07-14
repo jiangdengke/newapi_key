@@ -149,8 +149,8 @@ function InstanceFormFields({
           <input type="number" min="0" step="1" value={instanceForm.weight} onChange={(event) => onChange("weight", event.target.value)} required />
         </label>
         <label className="field">
-          <span>日期模式</span>
-          <input value={instanceForm.dateMode} onChange={(event) => onChange("dateMode", event.target.value)} placeholder="auto 或 0711" required />
+          <span>日期模式（可留空）</span>
+          <input value={instanceForm.dateMode} onChange={(event) => onChange("dateMode", event.target.value)} placeholder="留空、auto 或 0711" />
         </label>
       </div>
       <div className="checkbox-row">
@@ -534,7 +534,14 @@ export default function AdminDashboard({ onOpenInstance }) {
                   {instance.connectionProtocol === "admin-hub" ? (
                     <div><dt>目标站点</dt><dd>{instance.adminHubTargetSiteId}</dd></div>
                   ) : null}
-                  <div><dt>命名</dt><dd>{instance.namePrefix}-{instance.dateMode}-序号</dd></div>
+                  <div>
+                    <dt>命名</dt>
+                    <dd>
+                      {instance.namePrefix}-
+                      {instance.dateMode ? `${instance.dateMode}-` : ""}
+                      序号
+                    </dd>
+                  </div>
                   <div><dt>分组</dt><dd>{instance.group}</dd></div>
                   <div><dt>优先级</dt><dd>{instance.priority}</dd></div>
                   <div><dt>权重</dt><dd>{instance.weight}</dd></div>

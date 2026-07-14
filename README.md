@@ -6,7 +6,7 @@
 
 - 多个 New API 实例统一管理。
 - 每个实例使用独立访问 Key，访客会话仅能访问绑定实例。
-- 批量导入 Anthropic Key，并按 `claude-MMDD-序号` 创建渠道。
+- 批量导入 Anthropic Key，并按 `claude-MMDD-序号` 或 `claude-序号` 创建渠道。
 - 固定支持 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`。
 - 支持实例级渠道优先级和权重。
 - SQLite 保存实例配置、访问会话和脱敏渠道历史。

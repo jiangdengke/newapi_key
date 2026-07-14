@@ -1055,3 +1055,57 @@
 - `docs/nextjs-usage.md`：增加 Admin Hub HTTP 307 创建失败排查说明。
 - `progress.md`：追加本轮修复、验证证据和回滚点。
 - 回滚方式：恢复上述四个文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-14 - Task: 支持不含日期的渠道名称
+
+### What was done
+
+- 允许实例日期模式留空，渠道名称按“名称前缀-序号”生成，例如 `claude-001`；原有自动日期和固定 4 位日期模式保持不变。
+- 接续序号只匹配当前命名格式，不含日期模式不会把 `claude-0714-001` 等带日期渠道计入序号。
+- 管理端明确标注日期模式可留空，并同步补充部署和使用说明。
+
+### Testing
+
+- `node --test "test/validation.test.js" "test/admin-validation.test.js"`：通过；12 项测试全部通过，覆盖无日期名称生成、接续序号、空日期配置及原有日期模式。
+- `ReadLints`：检查本轮 JavaScript 改动，未发现诊断错误。
+- `git diff --check -- "lib/validation.js" "lib/instance-service.js" "components/admin-dashboard.js" "test/validation.test.js" "README.md" "docs/nextjs-usage.md"`：通过。
+
+### Notes
+
+- `lib/validation.js`：允许空日期段并按无日期格式生成渠道名称。
+- `lib/instance-service.js`：无日期模式使用名称前缀查询现有渠道。
+- `components/admin-dashboard.js`：日期模式输入改为可留空并说明可选值。
+- `test/validation.test.js`：增加无日期名称和空日期配置测试。
+- `README.md`：补充 `claude-序号` 命名能力。
+- `docs/nextjs-usage.md`：说明日期模式三种写法及对应名称格式。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚方式：恢复上述七个文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-14 - Task: 增加管理员密码修改功能
+
+### What was done
+
+- 在管理端右上角增加密码修改入口，管理员必须输入当前密码、新密码和确认密码，新密码至少 10 个字符。
+- 服务端仅允许已登录管理员同源调用；当前密码验证通过后更新 SQLite 密码哈希，保留当前会话并撤销该管理员的其他登录会话。
+- 增加中文业务日志和操作说明；密码、Session Cookie 和请求体不会写入日志或返回浏览器。
+
+### Testing
+
+- `node --test "test/admin-password-route.test.js" "test/admin-validation.test.js" "test/authorization.test.js"`：通过；14 项测试全部通过，覆盖匿名与访客拒绝、当前密码错误、输入校验、密码更新和其他会话撤销。
+- `npm test`：通过；36 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功并包含 `/api/admin/password` 动态路由。
+- `ReadLints`：检查本轮 JavaScript 改动，未发现诊断错误。
+- `git diff --check`：通过。
+
+### Notes
+
+- `app/api/admin/password/route.js`：增加管理员密码修改接口和同源、管理员权限校验。
+- `lib/admin-validation.js`：增加当前密码、新密码长度及二次确认校验。
+- `lib/application-store.js`：更新管理员密码哈希并撤销其他管理员会话。
+- `lib/logger.js`：增加管理员密码修改成功的中文日志标签。
+- `components/application-client.js`：增加管理员密码修改按钮和弹窗表单。
+- `test/admin-password-route.test.js`：覆盖密码修改接口权限、校验和会话行为。
+- `test/admin-validation.test.js`：覆盖管理员密码输入规则。
+- `docs/nextjs-usage.md`：说明管理员修改密码的入口、规则和会话影响。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚方式：恢复上述九个文件到本轮开始前版本；本轮未修改 SQLite schema，自动化测试仅使用内存数据库，未修改正式管理员密码。
