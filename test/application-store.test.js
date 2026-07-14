@@ -201,9 +201,13 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
       (instance) => instance.baseUrl === LEGACY_BASE_URL,
     );
     assert.equal(configuredInstance.accessKey.configured, false);
+    assert.equal(configuredInstance.connectionProtocol, "new-api");
+    assert.equal(configuredInstance.adminHubTargetSiteId, null);
     assert.equal(configuredInstance.priority, 0);
     assert.equal(configuredInstance.weight, 0);
     assert.equal(placeholderInstance.enabled, false);
+    assert.equal(placeholderInstance.connectionProtocol, "new-api");
+    assert.equal(placeholderInstance.adminHubTargetSiteId, null);
     assert.equal(placeholderInstance.priority, 0);
     assert.equal(placeholderInstance.weight, 0);
     assert.match(placeholderInstance.name, /^待配置旧实例 /);
@@ -292,7 +296,7 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
     assert.equal(store.getInstance(placeholderInstance.id).id, placeholderInstance.id);
     assert.equal(store.deleteInstance(configuredInstance.id), null);
 
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 5);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 6);
     assert.deepEqual(store.database.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(store.database.prepare(`
       SELECT COUNT(*) AS total FROM users WHERE role = 'user'
@@ -312,5 +316,68 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
     assert.equal(databaseBytes.includes(Buffer.from(ADMINISTRATOR_PASSWORD)), false);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("ApplicationStore persists Admin Hub protocol and target site", () => {
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: ENCRYPTION_KEY,
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+
+  try {
+    const createdInstance = store.createInstance({
+      name: "Deepnix Admin Hub",
+      baseUrl: "https://open.deepnix.ai",
+      username: "supplier-user",
+      password: "supplier-password",
+      connectionProtocol: "admin-hub",
+      adminHubTargetSiteId: 13,
+      group: "anthropic",
+      namePrefix: "claude",
+      startNumber: 1,
+      continueFromExisting: true,
+      priority: 0,
+      weight: 0,
+      dateMode: "auto",
+      enabled: true,
+    });
+    assert.equal(createdInstance.connectionProtocol, "admin-hub");
+    assert.equal(createdInstance.adminHubTargetSiteId, 13);
+
+    const connection = store.getInstanceConnection(createdInstance.id);
+    assert.equal(connection.connectionProtocol, "admin-hub");
+    assert.equal(connection.adminHubTargetSiteId, 13);
+    assert.equal(connection.password, "supplier-password");
+
+    const updatedInstance = store.updateInstance(createdInstance.id, {
+      name: createdInstance.name,
+      baseUrl: createdInstance.baseUrl,
+      username: createdInstance.adminUsername,
+      password: "",
+      connectionProtocol: "new-api",
+      adminHubTargetSiteId: null,
+      group: createdInstance.group,
+      namePrefix: createdInstance.namePrefix,
+      startNumber: createdInstance.startNumber,
+      continueFromExisting: createdInstance.continueFromExisting,
+      priority: createdInstance.priority,
+      weight: createdInstance.weight,
+      dateMode: createdInstance.dateMode,
+      enabled: true,
+    });
+    assert.equal(updatedInstance.connectionProtocol, "new-api");
+    assert.equal(updatedInstance.adminHubTargetSiteId, null);
+    assert.equal(
+      store.getInstanceConnection(createdInstance.id).password,
+      "supplier-password",
+    );
+  } finally {
+    store.close();
   }
 });

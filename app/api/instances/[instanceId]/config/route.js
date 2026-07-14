@@ -16,7 +16,12 @@ export async function GET(request, { params }) {
   const { instanceId } = await params;
   try {
     const { instance } = requireInstanceAccess(request, instanceId);
-    const { adminUsername, accessKey, ...accessibleInstance } = instance;
+    const {
+      adminUsername,
+      accessKey,
+      adminHubTargetSiteId,
+      ...accessibleInstance
+    } = instance;
     const channelDefaults = validateChannelDefaults({
       group: instance.group,
       namePrefix: instance.namePrefix,

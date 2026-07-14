@@ -255,6 +255,20 @@ textarea:focus {
   font-weight: 700;
 }
 
+.admin-hub-site-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-hub-site-picker select {
+  min-width: 0;
+}
+
+.admin-hub-site-picker .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .application-shell {
   min-height: 100vh;
 }

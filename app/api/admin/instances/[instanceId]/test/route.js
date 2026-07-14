@@ -29,12 +29,16 @@ export async function POST(request, { params }) {
     }
     const systemStatus = await getInstanceSystemStatus(instanceRuntime);
     const authenticatedUser = await getInstanceAuthenticatedUser(instanceRuntime);
+    await instanceRuntime.client.verifyChannelAccess();
     return jsonResponse({
       success: true,
       data: {
         systemName: systemStatus?.system_name || "New API",
         version: systemStatus?.version || "未知版本",
         username: authenticatedUser.username,
+        connectionProtocol: instanceRuntime.connection.connectionProtocol,
+        adminHubTargetSiteId: instanceRuntime.connection.adminHubTargetSiteId,
+        channelAccessVerified: true,
       },
     }, { requestId });
   } catch (error) {

@@ -5,6 +5,7 @@ import test from "node:test";
 import { POST as importChannels } from "../app/api/instances/[instanceId]/import/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
 import { SESSION_COOKIE_NAME } from "../lib/http.js";
+import { synchronizeInstanceRecords } from "../lib/instance-service.js";
 
 const RUNTIME_CONTEXT_KEY = Symbol.for("newapi-key.runtime-context");
 const ADMINISTRATOR_PASSWORD = "administrator-password";
@@ -138,6 +139,112 @@ function createMockNewApiServer(createdChannelRequests, storedChannels) {
   });
 }
 
+function createMockAdminHubServer({
+  createdChannelRequests,
+  observedSiteIds,
+  storedChannelTemplates,
+  metricState,
+}) {
+  return createServer(async (request, response) => {
+    const requestUrl = new URL(request.url, "http://127.0.0.1");
+
+    if (requestUrl.pathname.startsWith("/api/channel")) {
+      assert.fail(`Admin Hub 实例不应访问 ${requestUrl.pathname}`);
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/status") {
+      sendJson(response, {
+        success: true,
+        data: {
+          system_name: "Mock Deepnix Admin Hub",
+          version: "test-version",
+          quota_per_unit: 500_000,
+        },
+      });
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/user/login") {
+      const requestBody = await readRequestJson(request);
+      assert.deepEqual(requestBody, {
+        username: "admin-hub-supplier",
+        password: NEW_API_PASSWORD,
+      });
+      sendJson(response, {
+        success: true,
+        data: { id: 130, username: "admin-hub-supplier", role: 1 },
+      }, {
+        "Set-Cookie": "session=mock-admin-hub-session; Path=/; HttpOnly",
+      });
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/admin-hub/channels/") {
+      assert.equal(request.headers.cookie, "session=mock-admin-hub-session");
+      assert.equal(request.headers["new-api-user"], "130");
+      observedSiteIds.push(requestUrl.searchParams.get("site_id"));
+      const searchKeyword = requestUrl.searchParams.get("keyword") || "";
+      const matchingTemplates = storedChannelTemplates.filter(
+        (channelTemplate) => channelTemplate.name.includes(searchKeyword),
+      );
+      sendJson(response, {
+        success: true,
+        data: { items: matchingTemplates, total: matchingTemplates.length },
+      });
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/admin-hub/channels/") {
+      assert.equal(request.headers.cookie, "session=mock-admin-hub-session");
+      assert.equal(request.headers["new-api-user"], "130");
+      const requestBody = await readRequestJson(request);
+      createdChannelRequests.push(requestBody);
+      storedChannelTemplates.push({
+        id: 701,
+        name: requestBody.name,
+        channel_json: requestBody.channel_json,
+      });
+      sendJson(response, {
+        success: true,
+        data: {
+          id: 701,
+          publish_results: [{ site_id: 13, success: true }],
+        },
+      });
+      return;
+    }
+
+    if (
+      request.method === "POST"
+      && requestUrl.pathname === "/api/admin-hub/channels/status-batch"
+    ) {
+      const requestBody = await readRequestJson(request);
+      assert.deepEqual(requestBody, { ids: [701] });
+      sendJson(response, {
+        success: true,
+        data: { 701: { status: 1 } },
+      });
+      return;
+    }
+
+    if (
+      request.method === "POST"
+      && requestUrl.pathname === "/api/admin-hub/channels/used-quota"
+    ) {
+      const requestBody = await readRequestJson(request);
+      assert.deepEqual(requestBody, { ids: [701] });
+      sendJson(response, {
+        success: true,
+        data: { 701: { used_quota: metricState.usedQuota } },
+      });
+      return;
+    }
+
+    response.writeHead(404);
+    response.end();
+  });
+}
+
 function installTestRuntimeContext(store) {
   const previousRuntimeContext = globalThis[RUNTIME_CONTEXT_KEY];
   globalThis[RUNTIME_CONTEXT_KEY] = {
@@ -156,7 +263,7 @@ function installTestRuntimeContext(store) {
   };
 }
 
-function createImportRequest(instanceId, sessionToken) {
+function createImportRequest(instanceId, sessionToken, keys = IMPORT_KEYS) {
   return new Request(`http://localhost/api/instances/${instanceId}/import`, {
     method: "POST",
     headers: {
@@ -164,7 +271,7 @@ function createImportRequest(instanceId, sessionToken) {
       Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}`,
       Host: "localhost",
     },
-    body: JSON.stringify({ keys: IMPORT_KEYS }),
+    body: JSON.stringify({ keys }),
   });
 }
 
@@ -268,5 +375,109 @@ test("instance import route streams safe per-key results", async () => {
     restoreRuntimeContext();
     store.close();
     await closeServer(mockNewApiServer);
+  }
+});
+
+test("Admin Hub import targets AGT site 13 and synchronizes channel metrics", async () => {
+  const createdChannelRequests = [];
+  const observedSiteIds = [];
+  const storedChannelTemplates = [];
+  const metricState = { usedQuota: 250_000 };
+  const mockAdminHubServer = createMockAdminHubServer({
+    createdChannelRequests,
+    observedSiteIds,
+    storedChannelTemplates,
+    metricState,
+  });
+  const mockAdminHubBaseUrl = await listenOnAvailablePort(mockAdminHubServer);
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 12),
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+
+  try {
+    const instance = store.createInstance({
+      name: "Mock Admin Hub",
+      baseUrl: mockAdminHubBaseUrl,
+      username: "admin-hub-supplier",
+      password: NEW_API_PASSWORD,
+      connectionProtocol: "admin-hub",
+      adminHubTargetSiteId: 13,
+      group: "anthropic",
+      namePrefix: "claude",
+      startNumber: 1,
+      continueFromExisting: true,
+      priority: 5,
+      weight: 20,
+      dateMode: "0711",
+      enabled: true,
+    });
+    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+
+    const response = await importChannels(
+      createImportRequest(instance.id, session.token, [IMPORT_KEYS[0]]),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal(response.status, 200);
+
+    const responseText = await response.text();
+    const progressEvents = responseText.trim().split("\n").map(JSON.parse);
+    assert.deepEqual(progressEvents.at(-1), {
+      type: "complete",
+      total: 1,
+      completed: 1,
+      success: 1,
+      failure: 0,
+    });
+    assert.equal(responseText.includes(IMPORT_KEYS[0]), false);
+
+    assert.equal(createdChannelRequests.length, 1);
+    const createRequest = createdChannelRequests[0];
+    assert.equal(createRequest.last_selected_site_ids_json, "[13]");
+    assert.deepEqual(createRequest.site_group_overrides, {
+      13: ["anthropic"],
+    });
+    const createdChannel = JSON.parse(createRequest.channel_json);
+    assert.equal(createdChannel.platform_channel_type, "anthropic_claude");
+    assert.equal(createdChannel.type, 14);
+    assert.equal(createdChannel.name, "claude-0711-001");
+    assert.equal(createdChannel.key, IMPORT_KEYS[0]);
+    assert.equal(createdChannel.models, CLAUDE_MODELS.join(","));
+    assert.equal(createdChannel.group, "anthropic");
+    assert.equal(createdChannel.priority, 5);
+    assert.equal(createdChannel.weight, 20);
+    assert.equal(createdChannel.status, 1);
+    assert.equal(createdChannel.model_series, "anthropic.claude");
+    assert.equal(createdChannel.test_model, "claude-opus-4-8");
+    assert.ok(observedSiteIds.length >= 2);
+    assert.equal(observedSiteIds.every((siteId) => siteId === "13"), true);
+
+    let importedRecords = store.listRecords(instance.id);
+    assert.equal(importedRecords.length, 1);
+    assert.equal(importedRecords[0].newApiChannelId, 701);
+    assert.equal(importedRecords[0].usedQuota, 250_000);
+    assert.equal(importedRecords[0].usedUsd, 0.5);
+
+    metricState.usedQuota = 500_000;
+    const synchronization = await synchronizeInstanceRecords(
+      instance.id,
+      "admin-hub-sync-test",
+    );
+    assert.equal(synchronization.synchronizedCount, 1);
+    assert.equal(synchronization.missingCount, 0);
+    importedRecords = store.listRecords(instance.id);
+    assert.equal(importedRecords[0].usedQuota, 500_000);
+    assert.equal(importedRecords[0].usedUsd, 1);
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+    await closeServer(mockAdminHubServer);
   }
 });

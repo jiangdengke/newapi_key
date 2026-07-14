@@ -11,6 +11,8 @@ const EMPTY_INSTANCE_FORM = Object.freeze({
   baseUrl: "",
   username: "",
   password: "",
+  connectionProtocol: "new-api",
+  adminHubTargetSiteId: "",
   group: "anthropic",
   namePrefix: "claude",
   startNumber: "1",
@@ -27,6 +29,10 @@ function createInstanceFormFromInstance(instance) {
     baseUrl: instance.baseUrl,
     username: instance.adminUsername,
     password: "",
+    connectionProtocol: instance.connectionProtocol || "new-api",
+    adminHubTargetSiteId: instance.adminHubTargetSiteId === null
+      ? ""
+      : String(instance.adminHubTargetSiteId),
     group: instance.group,
     namePrefix: instance.namePrefix,
     startNumber: String(instance.startNumber),
@@ -44,10 +50,25 @@ function createInstanceRequestBody(instanceForm) {
     startNumber: Number(instanceForm.startNumber),
     priority: Number(instanceForm.priority),
     weight: Number(instanceForm.weight),
+    adminHubTargetSiteId: instanceForm.connectionProtocol === "admin-hub"
+      ? Number(instanceForm.adminHubTargetSiteId)
+      : null,
   };
 }
 
-function InstanceFormFields({ instanceForm, onChange, isEditing }) {
+function InstanceFormFields({
+  instanceForm,
+  onChange,
+  isEditing,
+  adminHubSites,
+  onLoadAdminHubSites,
+  isLoadingAdminHubSites,
+}) {
+  const selectedSiteId = String(instanceForm.adminHubTargetSiteId || "");
+  const selectedSiteIsAvailable = adminHubSites.some(
+    (site) => String(site.id) === selectedSiteId,
+  );
+
   return (
     <>
       <div className="form-grid">
@@ -56,9 +77,49 @@ function InstanceFormFields({ instanceForm, onChange, isEditing }) {
           <input value={instanceForm.name} onChange={(event) => onChange("name", event.target.value)} required />
         </label>
         <label className="field form-grid-wide">
-          <span>New API URL</span>
+          <span>服务地址</span>
           <input type="url" value={instanceForm.baseUrl} onChange={(event) => onChange("baseUrl", event.target.value)} required />
         </label>
+        <label className="field">
+          <span>连接协议</span>
+          <select value={instanceForm.connectionProtocol} onChange={(event) => onChange("connectionProtocol", event.target.value)}>
+            <option value="new-api">标准 New API</option>
+            <option value="admin-hub">Admin Hub</option>
+          </select>
+        </label>
+        {instanceForm.connectionProtocol === "admin-hub" ? (
+          <label className="field form-grid-wide">
+            <span>Admin Hub 目标站点</span>
+            <div className="admin-hub-site-picker">
+              <select
+                value={selectedSiteId}
+                onChange={(event) => onChange("adminHubTargetSiteId", event.target.value)}
+                disabled={isLoadingAdminHubSites || (adminHubSites.length === 0 && !selectedSiteId)}
+                required
+              >
+                <option value="">
+                  {adminHubSites.length === 0 ? "请先加载可见站点" : "请选择目标站点"}
+                </option>
+                {selectedSiteId && !selectedSiteIsAvailable ? (
+                  <option value={selectedSiteId}>当前站点（ID {selectedSiteId}）</option>
+                ) : null}
+                {adminHubSites.map((site) => (
+                  <option key={site.id} value={String(site.id)}>
+                    {site.name}（ID {site.id}）
+                  </option>
+                ))}
+              </select>
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={isLoadingAdminHubSites}
+                onClick={onLoadAdminHubSites}
+              >
+                {isLoadingAdminHubSites ? "正在加载..." : "加载站点"}
+              </button>
+            </div>
+          </label>
+        ) : null}
         <label className="field">
           <span>管理员用户名</span>
           <input value={instanceForm.username} onChange={(event) => onChange("username", event.target.value)} required />
@@ -113,6 +174,10 @@ export default function AdminDashboard({ onOpenInstance }) {
   const [createInstanceForm, setCreateInstanceForm] = useState({ ...EMPTY_INSTANCE_FORM });
   const [editingInstance, setEditingInstance] = useState(null);
   const [editInstanceForm, setEditInstanceForm] = useState({ ...EMPTY_INSTANCE_FORM });
+  const [createAdminHubSites, setCreateAdminHubSites] = useState([]);
+  const [editAdminHubSites, setEditAdminHubSites] = useState([]);
+  const [isLoadingCreateAdminHubSites, setIsLoadingCreateAdminHubSites] = useState(false);
+  const [isLoadingEditAdminHubSites, setIsLoadingEditAdminHubSites] = useState(false);
   const [deletingInstance, setDeletingInstance] = useState(null);
   const [generatedAccessKeys, setGeneratedAccessKeys] = useState({});
   const [isLoading, setIsLoading] = useState(true);
@@ -145,22 +210,105 @@ export default function AdminDashboard({ onOpenInstance }) {
   }
 
   function updateCreateInstanceForm(fieldName, value) {
-    setCreateInstanceForm((currentForm) => ({ ...currentForm, [fieldName]: value }));
+    const invalidatesLoadedSites = ["baseUrl", "username", "password"].includes(fieldName)
+      || fieldName === "connectionProtocol";
+    setCreateInstanceForm((currentForm) => ({
+      ...currentForm,
+      [fieldName]: value,
+      ...(invalidatesLoadedSites ? { adminHubTargetSiteId: "" } : {}),
+    }));
+    if (invalidatesLoadedSites) {
+      setCreateAdminHubSites([]);
+    }
   }
 
   function updateEditInstanceForm(fieldName, value) {
-    setEditInstanceForm((currentForm) => ({ ...currentForm, [fieldName]: value }));
+    const invalidatesLoadedSites = ["baseUrl", "username", "password"].includes(fieldName)
+      || fieldName === "connectionProtocol";
+    setEditInstanceForm((currentForm) => ({
+      ...currentForm,
+      [fieldName]: value,
+      ...(invalidatesLoadedSites ? { adminHubTargetSiteId: "" } : {}),
+    }));
+    if (invalidatesLoadedSites) {
+      setEditAdminHubSites([]);
+    }
   }
 
   function startEditingInstance(instance) {
     resetMessages();
     setEditingInstance(instance);
     setEditInstanceForm(createInstanceFormFromInstance(instance));
+    setEditAdminHubSites([]);
   }
 
   function closeEditInstanceModal() {
     setEditingInstance(null);
     setEditInstanceForm({ ...EMPTY_INSTANCE_FORM });
+    setEditAdminHubSites([]);
+  }
+
+  async function loadAdminHubSites({
+    instanceForm,
+    instanceId,
+    setSites,
+    setInstanceForm,
+    setIsLoadingSites,
+  }) {
+    resetMessages();
+    setIsLoadingSites(true);
+    try {
+      const responsePayload = await requestJson("/api/admin/admin-hub/sites", {
+        method: "POST",
+        body: JSON.stringify({
+          instanceId,
+          baseUrl: instanceForm.baseUrl,
+          username: instanceForm.username,
+          password: instanceForm.password,
+        }),
+      });
+      const availableSites = responsePayload.data.sites;
+      const availableSiteIds = new Set(
+        availableSites.map((site) => String(site.id)),
+      );
+      setSites(availableSites);
+      setInstanceForm((currentForm) => (
+        currentForm.adminHubTargetSiteId
+        && !availableSiteIds.has(String(currentForm.adminHubTargetSiteId))
+          ? { ...currentForm, adminHubTargetSiteId: "" }
+          : currentForm
+      ));
+      const successMessage = availableSites.length > 0
+        ? `已加载 ${availableSites.length} 个可见站点`
+        : "当前 Admin Hub 账号没有可见站点";
+      showToast(successMessage, { type: "success" });
+    } catch (error) {
+      const currentErrorMessage = error?.message || "加载 Admin Hub 站点失败";
+      setErrorMessage(currentErrorMessage);
+      showToast(currentErrorMessage, { type: "error" });
+    } finally {
+      setIsLoadingSites(false);
+    }
+  }
+
+  function loadCreateAdminHubSites() {
+    return loadAdminHubSites({
+      instanceForm: createInstanceForm,
+      instanceId: null,
+      setSites: setCreateAdminHubSites,
+      setInstanceForm: setCreateInstanceForm,
+      setIsLoadingSites: setIsLoadingCreateAdminHubSites,
+    });
+  }
+
+  function loadEditAdminHubSites() {
+    return loadAdminHubSites({
+      instanceForm: editInstanceForm,
+      instanceId: editingInstance?.id ?? null,
+      setSites: setEditAdminHubSites,
+      setInstanceForm: setEditInstanceForm,
+      setIsLoadingSites: setIsLoadingEditAdminHubSites,
+    });
   }
 
   async function createInstance(event) {
@@ -172,9 +320,10 @@ export default function AdminDashboard({ onOpenInstance }) {
         method: "POST",
         body: JSON.stringify(createInstanceRequestBody(createInstanceForm)),
       });
-      const successMessage = "New API 实例已创建";
+      const successMessage = "实例已创建";
       showToast(successMessage, { type: "success" });
       setCreateInstanceForm({ ...EMPTY_INSTANCE_FORM });
+      setCreateAdminHubSites([]);
       await loadManagementData();
     } catch (error) {
       const currentErrorMessage = error?.message || "保存实例失败";
@@ -250,10 +399,16 @@ export default function AdminDashboard({ onOpenInstance }) {
         `/api/admin/instances/${instanceId}/test`,
         { method: "POST", body: "{}" },
       );
-      const successMessage = (
-        `连接成功：${responsePayload.data.systemName} `
-        + `${responsePayload.data.version}（${responsePayload.data.username}）`
-      );
+      const successMessage = responsePayload.data.connectionProtocol === "admin-hub"
+        ? (
+          `连接成功：Admin Hub 渠道权限已验证`
+          + `（目标站点 ${responsePayload.data.adminHubTargetSiteId}，`
+          + `${responsePayload.data.username}）`
+        )
+        : (
+          `连接成功：${responsePayload.data.systemName} `
+          + `${responsePayload.data.version}（${responsePayload.data.username}，渠道权限已验证）`
+        );
       showToast(successMessage, { type: "success" });
     } catch (error) {
       const currentErrorMessage = error?.message || "测试连接失败";
@@ -340,14 +495,17 @@ export default function AdminDashboard({ onOpenInstance }) {
           <form className="panel management-form" onSubmit={createInstance}>
             <div className="panel-heading">
               <div>
-                <h2>新增 New API 实例</h2>
-                <p>New API 管理员密码将加密保存，实例访问者不会看到连接凭据。</p>
+                <h2>新增实例</h2>
+                <p>服务端管理员密码将加密保存，实例访问者不会看到连接凭据。</p>
               </div>
             </div>
             <InstanceFormFields
               instanceForm={createInstanceForm}
               onChange={updateCreateInstanceForm}
               isEditing={false}
+              adminHubSites={createAdminHubSites}
+              onLoadAdminHubSites={loadCreateAdminHubSites}
+              isLoadingAdminHubSites={isLoadingCreateAdminHubSites}
             />
             <div className="submit-row">
               <button className="button button-primary" disabled={isSubmitting}>
@@ -369,6 +527,13 @@ export default function AdminDashboard({ onOpenInstance }) {
                 <p className="instance-url">{instance.baseUrl}</p>
                 <dl className="instance-metadata">
                   <div><dt>管理员</dt><dd>{instance.adminUsername}</dd></div>
+                  <div>
+                    <dt>协议</dt>
+                    <dd>{instance.connectionProtocol === "admin-hub" ? "Admin Hub" : "标准 New API"}</dd>
+                  </div>
+                  {instance.connectionProtocol === "admin-hub" ? (
+                    <div><dt>目标站点</dt><dd>{instance.adminHubTargetSiteId}</dd></div>
+                  ) : null}
                   <div><dt>命名</dt><dd>{instance.namePrefix}-{instance.dateMode}-序号</dd></div>
                   <div><dt>分组</dt><dd>{instance.group}</dd></div>
                   <div><dt>优先级</dt><dd>{instance.priority}</dd></div>
@@ -420,7 +585,7 @@ export default function AdminDashboard({ onOpenInstance }) {
                 </div>
               </article>
             ))}
-            {!isLoading && instances.length === 0 ? <div className="empty-state">尚未配置 New API 实例。</div> : null}
+            {!isLoading && instances.length === 0 ? <div className="empty-state">尚未配置实例。</div> : null}
           </section>
       </>
 
@@ -451,6 +616,9 @@ export default function AdminDashboard({ onOpenInstance }) {
                 instanceForm={editInstanceForm}
                 onChange={updateEditInstanceForm}
                 isEditing
+                adminHubSites={editAdminHubSites}
+                onLoadAdminHubSites={loadEditAdminHubSites}
+                isLoadingAdminHubSites={isLoadingEditAdminHubSites}
               />
               <div className="modal-actions">
                 <button

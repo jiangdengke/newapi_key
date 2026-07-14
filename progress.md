@@ -920,3 +920,138 @@
 - `docs/nextjs-usage.md`：补充手动同步、自动同步、可见页限制和并发策略。
 - `progress.md`：追加本轮实现、验证证据和回滚点。
 - 回滚方式：从本轮开始前的工作区备份恢复上述文件；本轮未修改 SQLite schema 或正式数据，若无文件备份则按 Notes 文件清单逐项撤销本轮新增接口、组件控件、并发逻辑、测试和文档内容。
+
+## 2026-07-14 - Task: 支持 Deepnix Admin Hub 的 AGT 站渠道管理
+
+### What was done
+
+- 为实例增加标准 New API 和 Admin Hub 两种连接协议，以及持久化的 Admin Hub 目标站点 ID；SQLite schema 升级到版本 6，已有实例无损保留为标准 New API。
+- 增加 Admin Hub 渠道适配器，使用登录 Session Cookie 完成站点范围内的渠道搜索、Anthropic 渠道创建、状态与累计用量同步；Deepnix 实例可固定选择 AGT 站点 ID `13`，不会访问标准 `/api/channel/*` 渠道接口。
+- 管理端增加协议和目标站点配置，连接测试增加只读渠道权限验证；访客响应保留协议类型但不暴露 Admin Hub 目标站点 ID。
+
+### Testing
+
+- `npm test`：通过；30 项测试全部通过，覆盖 schema 6 迁移、Admin Hub 配置校验、站点 `13` 导入、状态与用量同步、Key 脱敏、标准 New API 回归和访客字段隔离。
+- `npm run build`：通过；Next.js 生产构建成功，管理界面和全部 Route Handler 完成编译。
+- `ReadLints`：检查本轮修改的存储、校验、协议客户端、运行时、路由、组件和测试文件，未发现诊断错误。
+- 未向真实 Deepnix 平台写入或创建渠道；Admin Hub 写操作仅通过本地 HTTP mock 验证。
+
+### Notes
+
+- `lib/application-store.js`：增加 schema 6 迁移以及实例协议、目标站点字段的读写。
+- `lib/admin-validation.js`：校验协议枚举，并在 Admin Hub 模式下要求正整数目标站点 ID。
+- `lib/admin-hub-client.js`：实现 Admin Hub 登录会话复用、站点过滤、渠道创建和指标归一化。
+- `lib/new-api-client.js`：增加标准 New API 的只读渠道权限验证入口。
+- `lib/runtime-context.js`：按实例协议创建标准 New API 或 Admin Hub 客户端。
+- `app/api/admin/instances/[instanceId]/test/route.js`：连接测试增加渠道读取权限验证和协议结果。
+- `app/api/instances/route.js`：从通用实例响应中移除 Admin Hub 目标站点 ID。
+- `app/api/instances/[instanceId]/config/route.js`：从访客实例配置中移除 Admin Hub 目标站点 ID。
+- `components/admin-dashboard.js`：增加协议、目标站点表单和 Admin Hub 连接结果展示。
+- `test/application-store.test.js`：覆盖旧数据库迁移和 Admin Hub 实例配置持久化。
+- `test/admin-validation.test.js`：覆盖协议默认值、站点 `13`、无效输入和编辑密码保留。
+- `test/authorization.test.js`：验证管理员可读目标站点而访客不可读。
+- `test/instance-route.test.js`：通过本地 Admin Hub mock 覆盖站点 `13` 导入和同步协议。
+- `docs/nextjs-usage.md`：记录协议选择、AGT 站配置、schema 6 迁移和当前同地址单站点限制。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚方式：先停止服务，将代码恢复到本轮开始前版本，再执行 `cp "<升级前 SQLite 备份>" "${DATABASE_PATH:-data/channel-records.sqlite}"` 恢复 schema 5 数据库后重启服务；不要直接删除 schema 6 新增列。
+
+## 2026-07-14 - Task: 动态加载 Admin Hub 可见站点
+
+### What was done
+
+- 管理端的 Admin Hub 目标站点由数字输入改为动态下拉选择；管理员填写连接信息后可实时加载当前账号可见站点，并按站点名称选择。
+- 增加仅管理员可调用的只读站点查询接口，通过 Admin Hub 登录 Session 读取资源站点列表；新建实例使用当前表单密码，编辑实例密码留空时复用数据库中已加密保存的密码。
+- 服务端只向浏览器返回站点名称和 ID，不返回 Admin Hub 密码、Cookie 或其他登录信息；实例保存格式仍为目标站点 ID，不修改 schema 6。
+
+### Testing
+
+- `node --test "test/admin-hub-sites-route.test.js"`：通过；验证管理员授权、已保存密码复用、Session Cookie、站点列表参数、不同字段命名归一化和密码不出现在响应中。
+- `npm test`：通过；31 项测试全部通过，原有标准 New API、Admin Hub 导入、同步、授权和 schema 迁移回归均通过。
+- `npm run build`：通过；Next.js 生产构建成功，并识别新增 `/api/admin/admin-hub/sites` 路由。
+- `ReadLints`：检查动态站点客户端、接口、管理组件、样式和测试，未发现诊断错误。
+- 未访问或修改真实 Deepnix 数据；自动化测试只访问本地模拟 Admin Hub。
+
+### Notes
+
+- `lib/admin-hub-client.js`：增加可见站点读取和站点名称、ID 归一化，并允许未选目标站点时仅执行资源发现。
+- `app/api/admin/admin-hub/sites/route.js`：增加管理员鉴权下的动态站点查询接口和编辑密码复用。
+- `components/admin-dashboard.js`：增加站点加载状态、动态下拉选择和连接信息变化后的列表失效处理。
+- `app/globals.css`：增加站点下拉框与加载按钮布局。
+- `test/admin-hub-sites-route.test.js`：覆盖新建和编辑场景的动态站点查询协议及敏感信息隔离。
+- `docs/nextjs-usage.md`：更新 Admin Hub 动态加载和选择站点的操作说明。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚方式：恢复上述代码、样式、测试和文档文件到本轮开始前版本；本轮未修改 SQLite schema，已保存的目标站点 ID 无需回滚。
+
+## 2026-07-14 - Task: 修复 Admin Hub 连接测试的 HTTP 301
+
+### What was done
+
+- 将 Admin Hub 渠道列表和精确查询改为 Deepnix 要求的带尾斜杠规范路径，避免渠道权限验证收到 HTTP 301 HTML 跳转页并误报非 JSON 响应。
+- 保留 HTTPS 服务地址、登录、站点加载和渠道创建路径不变，只修正发生重定向的只读渠道查询入口。
+
+### Testing
+
+- 只读探测 `https://open.deepnix.ai/api/admin-hub/channels?p=1&page_size=1&site_id=13`：确认返回 HTTP 301，目标为 `/api/admin-hub/channels/?p=1&page_size=1&site_id=13`。
+- 只读探测规范路径：未登录时返回预期的 HTTP 401 JSON，证明该路径不再发生 301 HTML 重定向。
+- `node --test "test/instance-route.test.js"`：通过；标准 New API 导入和 Admin Hub 站点 `13` 导入、同步共 2 项测试全部通过。
+- `ReadLints`：检查 Admin Hub 客户端和路由集成测试，未发现诊断错误。
+- `git diff --check`：通过。
+- 未登录真实 Deepnix，未创建、修改或删除真实渠道。
+
+### Notes
+
+- `lib/admin-hub-client.js`：渠道列表请求改用 `/api/admin-hub/channels/` 规范路径。
+- `test/instance-route.test.js`：模拟服务要求带尾斜杠路径，防止该问题回归。
+- `docs/nextjs-usage.md`：增加 Admin Hub HTTP 301 排查说明。
+- `progress.md`：追加本轮修复、验证证据和回滚点。
+- 回滚方式：恢复上述四个文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-14 - Task: 修复 Admin Hub 站点分组覆盖类型
+
+### What was done
+
+- 根据 Deepnix 创建接口的 Go 类型错误，将 `site_group_overrides` 从“站点 ID → 单个分组字符串”修正为“站点 ID → 分组字符串数组”。
+- AGT 站点 `13` 的 `anthropic` 分组现在发送为 `{ "13": ["anthropic"] }`，其余创建、发布和渠道配置字段保持不变。
+
+### Testing
+
+- 生产日志核对：规范路径修复后请求已进入创建接口，失败原因明确为 `site_group_overrides` 的站点值无法从字符串反序列化为 `[]string`。
+- `node --test "test/instance-route.test.js"`：通过；标准 New API 导入和 Admin Hub 站点 `13` 导入、同步共 2 项测试全部通过，并断言分组覆盖值为数组。
+- `npm test`：通过；31 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功。
+- `ReadLints`：检查 Admin Hub 客户端和路由集成测试，未发现诊断错误。
+- `git diff --check`：通过。
+- 未再次向真实 Deepnix 提交渠道；修复依据为用户提供的生产接口类型错误。
+
+### Notes
+
+- `lib/admin-hub-client.js`：将站点分组覆盖值改为字符串数组。
+- `test/instance-route.test.js`：断言 AGT 站点 `13` 对应 `["anthropic"]`。
+- `docs/nextjs-usage.md`：增加站点分组覆盖类型错误的排查说明。
+- `progress.md`：追加本轮修复、验证证据和回滚点。
+- 回滚方式：恢复上述四个文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-14 - Task: 修复 Admin Hub 渠道创建的 HTTP 307
+
+### What was done
+
+- 将 Admin Hub 渠道创建 POST 请求改为 Deepnix 要求的带尾斜杠规范路径，避免服务端返回 HTTP 307 后客户端因禁止自动重定向而报空响应。
+- 同步收紧本地协议测试，使模拟 Admin Hub 只接受 `/api/admin-hub/channels/` 创建路径，防止列表路径已修复但创建路径再次遗漏。
+
+### Testing
+
+- 生产日志核对：连接测试修复后已返回 HTTP 200；导入失败明确发生在渠道创建阶段，错误为 `New API 返回了空响应（HTTP 307）`。
+- `node --test "test/instance-route.test.js"`：通过；标准 New API 导入和 Admin Hub 站点 `13` 导入、同步共 2 项测试全部通过。
+- `npm test`：通过；31 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功。
+- `ReadLints`：检查 Admin Hub 客户端和路由集成测试，未发现诊断错误。
+- `git diff --check`：通过。
+- 未再次向真实 Deepnix 提交渠道；修复依据为用户提供的生产失败日志和规范路径只读探测结果。
+
+### Notes
+
+- `lib/admin-hub-client.js`：渠道创建请求改用 `/api/admin-hub/channels/` 规范路径。
+- `test/instance-route.test.js`：模拟服务要求创建请求使用带尾斜杠路径。
+- `docs/nextjs-usage.md`：增加 Admin Hub HTTP 307 创建失败排查说明。
+- `progress.md`：追加本轮修复、验证证据和回滚点。
+- 回滚方式：恢复上述四个文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
