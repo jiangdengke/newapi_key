@@ -29,11 +29,19 @@ export async function POST(request) {
     let synchronizedCount = 0;
     let missingCount = 0;
     let failedInstanceCount = 0;
+    const usageStartedRecords = [];
     for (const instance of instancesToSynchronize) {
       try {
         const synchronization = await synchronizeInstanceRecords(instance.id, requestId);
         synchronizedCount += synchronization.synchronizedCount;
         missingCount += synchronization.missingCount;
+        usageStartedRecords.push(
+          ...synchronization.usageStartedRecords.map((record) => ({
+            ...record,
+            instanceId: instance.id,
+            instanceName: instance.name,
+          })),
+        );
       } catch (error) {
         failedInstanceCount += 1;
         context.logger.error("administrator_instance_sync_failed", {
@@ -51,6 +59,7 @@ export async function POST(request) {
         synchronizedCount,
         missingCount,
         failedInstanceCount,
+        usageStartedRecords,
       },
     }, { requestId });
   } catch (error) {

@@ -1198,3 +1198,37 @@
 - `docs/nextjs-usage.md`：说明上游管理员密码的填写时机和编辑实例时的复用行为。
 - `progress.md`：追加本轮实现、验证证据和回滚点。
 - 回滚点：本轮用户提出“只允许修改平台管理员密码”之前的未提交工作区状态；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-15 - Task: 修复 Admin Hub 用量同步并提醒 Key 开始消费
+
+### What was done
+
+- Admin Hub 累计用量在顶层汇总值缺失或为 `0` 时，改为汇总 `sites[].used_quota` 站点明细，避免上游已有消费而本地仍显示 `$0.00`。
+- 同步写库时检测累计用量首次从 `0` 变为正数的渠道，并返回渠道名称、脱敏 Key 和当前累计金额；后续持续同步不重复返回提醒。
+- 实例工作区和管理端均在手动同步或可见标签页自动同步发现 Key 开始消费时显示轻提示，管理端提示同时包含实例名称。
+- 更新项目概览和使用说明，明确 Admin Hub 用量回退规则与提醒触发条件。
+
+### Testing
+
+- 回归测试先稳定复现：Admin Hub 顶层 `used_quota=0`、站点明细存在用量时，本地仍写入 `0`；同步响应也没有开始消费记录。
+- `node --test "test/instance-route.test.js" "test/synchronization.test.js" "test/admin-sync-route.test.js"`：通过；6 项定向测试覆盖站点用量汇总、首次消费提醒、后续不重复提醒和管理端实例信息聚合。
+- `npm test`：通过；39 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建成功，管理端和实例工作区轻提示逻辑正常编译。
+- `ReadLints`：检查本轮 JavaScript 改动，未发现诊断错误。
+- `git diff --check`：通过。
+- 公开 Deepnix 前端确认渠道累计用量来自 `/api/admin-hub/channels/used-quota` 的 `used_quota` 和 `sites` 数据；本机 Docker 未运行，未对正式实例发起写操作或修改真实渠道。
+
+### Notes
+
+- `lib/admin-hub-client.js`：兼容 Admin Hub 站点明细累计用量并过滤无效数值。
+- `lib/application-store.js`：检测并返回累计用量首次由 `0` 变为正数的脱敏记录。
+- `app/api/admin/records/route.js`：聚合各实例的开始消费记录并补充实例信息。
+- `components/instance-workspace.js`：实例同步发现 Key 开始消费时显示轻提示。
+- `components/admin-records-overview.js`：管理端同步发现 Key 开始消费时显示带实例名称的轻提示。
+- `test/instance-route.test.js`：模拟顶层用量为 `0`、站点明细有消费的 Admin Hub 响应。
+- `test/synchronization.test.js`：验证开始消费只在首次同步返回一次。
+- `test/admin-sync-route.test.js`：验证管理端聚合开始消费记录并跳过无资格实例。
+- `README.md`：补充 Key 开始产生用量时的轻提示能力。
+- `docs/nextjs-usage.md`：说明用量站点明细回退和提醒规则。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚方式：执行 `git restore --source=32fe555 -- "README.md" "app/api/admin/records/route.js" "components/admin-records-overview.js" "components/instance-workspace.js" "docs/nextjs-usage.md" "lib/admin-hub-client.js" "lib/application-store.js" "test/admin-sync-route.test.js" "test/instance-route.test.js" "test/synchronization.test.js" "progress.md"`；本轮未修改 SQLite schema 或正式数据。

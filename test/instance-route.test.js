@@ -237,7 +237,12 @@ function createMockAdminHubServer({
       assert.deepEqual(requestBody, { ids: [701] });
       sendJson(response, {
         success: true,
-        data: { 701: { used_quota: metricState.usedQuota } },
+        data: {
+          701: {
+            used_quota: 0,
+            sites: [{ site_id: 13, used_quota: metricState.usedQuota }],
+          },
+        },
       });
       return;
     }

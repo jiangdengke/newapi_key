@@ -11,6 +11,7 @@
 - Claude 固定使用 `anthropic` 分组，OpenAI 固定使用 `openai` 分组，无需手工配置渠道分组。
 - Claude 与 OpenAI 通过同一导入面板中的并列按钮切换，未提交的输入内容分别保留。
 - 标准 New API 和 Deepnix Admin Hub 两种连接协议均支持 Claude 与 OpenAI 渠道。
+- 同步渠道累计用量，并在脱敏 Key 首次开始产生用量时显示轻提示。
 - 支持实例级渠道优先级和权重。
 - SQLite 保存实例配置、访问会话和脱敏渠道历史。
 - 完整导入 Key 使用 AES-256-GCM 加密保存，同时保存掩码和 SHA-256 指纹。

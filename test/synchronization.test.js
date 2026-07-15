@@ -55,7 +55,7 @@ test("record synchronization limits searches and coalesces overlapping requests"
           models: "claude-opus-4-8",
           status: 1,
           balance: channelIndex,
-          used_quota: channelIndex * 500_000,
+          used_quota: 0,
         },
         quotaPerUnit: 500_000,
       });
@@ -118,7 +118,20 @@ test("record synchronization limits searches and coalesces overlapping requests"
     assert.deepEqual(secondSynchronization, firstSynchronization);
     assert.equal(firstSynchronization.synchronizedCount, trackedChannelCount);
     assert.equal(firstSynchronization.missingCount, 0);
-    assert.equal(totalSearchCount, trackedChannelCount);
+    assert.equal(
+      firstSynchronization.usageStartedRecords.length,
+      trackedChannelCount,
+    );
+    assert.equal(
+      firstSynchronization.usageStartedRecords[0].usedUsd,
+      2,
+    );
+    const subsequentSynchronization = await synchronizeInstanceRecords(
+      instance.id,
+      "subsequent-request",
+    );
+    assert.deepEqual(subsequentSynchronization.usageStartedRecords, []);
+    assert.equal(totalSearchCount, trackedChannelCount * 2);
     assert.equal(maximumActiveSearchCount, 5);
   } finally {
     if (previousRuntimeContext === undefined) {

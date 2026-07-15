@@ -61,6 +61,17 @@ function getStatusText(statusLabel) {
   return "已停用";
 }
 
+function showUsageStartedNotifications(usageStartedRecords) {
+  for (const usageStartedRecord of usageStartedRecords || []) {
+    showToast(
+      `${usageStartedRecord.instanceName}：Key ${usageStartedRecord.keyMask} `
+      + `对应渠道 ${usageStartedRecord.channelName} 已开始产生用量，当前累计 `
+      + formatUsd(usageStartedRecord.usedUsd),
+      { type: "info" },
+    );
+  }
+}
+
 export default function AdminRecordsOverview({ instances, onOpenInstance, refreshToken }) {
   const [instanceFilter, setInstanceFilter] = useState("");
   const [channelNameFilter, setChannelNameFilter] = useState("");
@@ -145,6 +156,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
         showLoadingState: false,
       });
       const synchronizationData = responsePayload.data;
+      showUsageStartedNotifications(synchronizationData.usageStartedRecords);
       const failureMessage = synchronizationData.failedInstanceCount > 0
         ? `，${synchronizationData.failedInstanceCount} 个实例失败`
         : "";

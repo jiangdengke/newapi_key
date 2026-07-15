@@ -94,7 +94,10 @@ test("administrator sync route authorizes callers and skips ineligible instances
       enabled: false,
     });
     store.createInstance(createInstanceInput("empty-instance", true));
+    recordTrackedChannel(store, enabledInstance, 101);
     recordTrackedChannel(store, disabledInstance, 102);
+    const visitorAccess = store.regenerateInstanceAccessKey(enabledInstance.id);
+    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
 
     let synchronizedSearchCount = 0;
     const enabledConnection = store.getInstanceConnection(enabledInstance.id);
@@ -140,8 +143,6 @@ test("administrator sync route authorizes callers and skips ineligible instances
     );
     assert.equal(anonymousResponse.status, 401);
 
-    const visitorAccess = store.regenerateInstanceAccessKey(enabledInstance.id);
-    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
     const visitorResponse = await synchronizeAdministratorRecords(
       createSynchronizationRequest(visitorSession.token),
     );
@@ -158,12 +159,20 @@ test("administrator sync route authorizes callers and skips ineligible instances
     assert.equal(administratorResponse.status, 200);
     const responsePayload = await administratorResponse.json();
     assert.deepEqual(responsePayload.data, {
-      instanceCount: 0,
-      synchronizedCount: 0,
+      instanceCount: 1,
+      synchronizedCount: 1,
       missingCount: 0,
       failedInstanceCount: 0,
+      usageStartedRecords: [{
+        recordId: store.listRecords(enabledInstance.id)[0].id,
+        channelName: "claude-0711-101",
+        keyMask: "sk-ant-****-101",
+        usedUsd: 2,
+        instanceId: enabledInstance.id,
+        instanceName: enabledInstance.name,
+      }],
     });
-    assert.equal(synchronizedSearchCount, 0);
+    assert.equal(synchronizedSearchCount, 1);
   } finally {
     if (previousRuntimeContext === undefined) {
       delete globalThis[RUNTIME_CONTEXT_KEY];

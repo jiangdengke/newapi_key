@@ -67,6 +67,17 @@ function getStatusText(statusLabel) {
   return "已停用";
 }
 
+function showUsageStartedNotifications(usageStartedRecords) {
+  for (const usageStartedRecord of usageStartedRecords || []) {
+    showToast(
+      `Key ${usageStartedRecord.keyMask} 对应渠道 `
+      + `${usageStartedRecord.channelName} 已开始产生用量，当前累计 `
+      + formatUsd(usageStartedRecord.usedUsd),
+      { type: "info" },
+    );
+  }
+}
+
 export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   const [configuration, setConfiguration] = useState(null);
   const [claudeKeysText, setClaudeKeysText] = useState("");
@@ -378,6 +389,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
         { method: "POST", body: "{}" },
       );
       await loadHistory(historyQuery);
+      showUsageStartedNotifications(responsePayload.data.usageStartedRecords);
       const missingMessage = responsePayload.data.missingCount > 0
         ? `，${responsePayload.data.missingCount} 个渠道不存在`
         : "";
