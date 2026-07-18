@@ -5,7 +5,12 @@ import {
   jsonResponse,
 } from "../../../../../lib/http.js";
 import { getRuntimeContext } from "../../../../../lib/runtime-context.js";
-import { CLAUDE_MODELS, validateChannelDefaults } from "../../../../../lib/validation.js";
+import {
+  CLAUDE_MODELS,
+  GROK_MODELS,
+  OPENAI_MODELS,
+  validateChannelDefaults,
+} from "../../../../../lib/validation.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +41,13 @@ export async function GET(request, { params }) {
       data: {
         instance: accessibleInstance,
         models: CLAUDE_MODELS,
+        modelsByChannelKind: {
+          claude: CLAUDE_MODELS,
+          openai: OPENAI_MODELS,
+          ...(instance.connectionProtocol === "new-api"
+            ? { grok: GROK_MODELS }
+            : {}),
+        },
         channelDefaults,
       },
     }, { requestId });

@@ -1232,3 +1232,88 @@
 - `docs/nextjs-usage.md`：说明用量站点明细回退和提醒规则。
 - `progress.md`：追加本轮实现、验证证据和回滚点。
 - 回滚方式：执行 `git restore --source=32fe555 -- "README.md" "app/api/admin/records/route.js" "components/admin-records-overview.js" "components/instance-workspace.js" "docs/nextjs-usage.md" "lib/admin-hub-client.js" "lib/application-store.js" "test/admin-sync-route.test.js" "test/instance-route.test.js" "test/synchronization.test.js" "progress.md"`；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-18 - Task: 增加标准 New API Grok 渠道导入
+
+### What was done
+
+- 在保留 Claude 与 OpenAI 的基础上，为标准 New API 实例增加官方 xAI Key 导入；Grok 使用 New API 渠道类型 `48`、`xai` 固定分组和平台内置的官方 xAI 地址。
+- Grok 固定创建 10 个模型：三个 Grok 4.20 模型、`grok-4.3`、`grok-4.5`、`grok-build-0.1`、两个 Imagine 图像模型和两个 Imagine 视频模型。
+- 标准 New API 实例的导入面板改为 Claude、OpenAI、Grok 三个并列切换按钮，并独立保留三类尚未提交的 Key；Admin Hub 继续只显示 Claude 与 OpenAI。
+- 服务端明确拒绝在 Admin Hub 实例导入 Grok，避免手工构造请求绕过页面限制；Grok 继续复用加密历史、完整 Key 精确查询、共享名称序号、状态与用量同步及首次消费提醒。
+- 配置接口增加按渠道类型返回模型清单，同时保留旧版 `models` 字段供兼容使用。
+
+### Testing
+
+- `node --test "test/instance-route.test.js" "test/validation.test.js"`：通过；14 项定向测试覆盖 Grok 类型校验、标准 New API 创建请求、固定模型、`xai` 分组、共享序号、加密历史、同步和 Admin Hub 拒绝行为。
+- `npm test`：通过；40 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建、TypeScript 检查和静态页面生成成功。
+- `docker compose config --quiet`：通过。
+- `git diff --check`：通过。
+- 上游 `QuantumNous/new-api` 源码确认 xAI 渠道类型为 `48`，平台内置地址为 `https://api.x.ai`；xAI 官方文档与官方 Python SDK用于核对固定模型 ID。未连接真实 New API 或 Admin Hub，未创建、修改或删除真实渠道。
+
+### Notes
+
+- `lib/validation.js`：增加 Grok 渠道类型、xAI 类型编号和固定 10 模型清单。
+- `lib/instance-service.js`：增加 Grok 创建定义、`xai` 固定分组和仅标准 New API 的协议限制。
+- `components/instance-workspace.js`：增加 Grok 切换按钮、独立 Key 输入状态和 Grok 导入反馈。
+- `app/globals.css`：支持三列渠道类型切换布局及窄屏按钮间距。
+- `app/api/instances/[instanceId]/config/route.js`：按渠道类型返回 Claude、OpenAI 和可用的 Grok 模型清单。
+- `test/instance-route.test.js`：验证类型 `48` 的标准 New API Grok 创建、存储、同步和 Admin Hub 拒绝。
+- `test/validation.test.js`：验证 Grok 渠道类型输入。
+- `package.json`、`README.md`、`docs/nextjs-usage.md`：补充官方 xAI Key、Grok 模型、协议边界、分组和页面切换说明。
+- `progress.md`：追加本轮实现、验证证据和回滚点。
+- 回滚方式：恢复上述文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-18 - Task: 兼容浏览器扩展引起的根节点 hydration 差异
+
+### What was done
+
+- 在应用根 `<html>` 节点启用 hydration 警告抑制，兼容沉浸式翻译等浏览器扩展在 React 接管页面前注入根节点属性的情况。
+- 抑制范围仅限根节点自身的属性差异，不隐藏业务组件内部真实的服务端与客户端渲染不一致问题。
+
+### Testing
+
+- `npm run build`：通过；Next.js 生产构建、TypeScript 检查和静态页面生成成功。
+- `ReadLints`：检查 `app/layout.js`，未发现诊断错误。
+- `git diff --check`：通过。
+- 未改动业务数据、实例配置或真实 New API 渠道。
+
+### Notes
+
+- `app/layout.js`：为根 `<html>` 增加 `suppressHydrationWarning`，兼容浏览器扩展注入的属性。
+- `progress.md`：追加本轮修复、验证证据和回滚方式。
+- 回滚方式：删除 `app/layout.js` 中 `<html>` 节点的 `suppressHydrationWarning` 属性，并删除本条进度记录；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-07-18 - Task: 从标准 New API 动态选择已有渠道分组
+
+### What was done
+
+- 标准 New API 工作区通过管理员接口 `GET /api/group/` 动态读取当前实例已有分组，Claude、OpenAI 和 Grok 导入时均可单选一个分组。
+- 三类渠道分别保留当前分组选择；首次加载优先使用 `anthropic`、`openai`、`xai`，对应默认值不存在时自动选择列表第一项，并提供“刷新分组”操作。
+- 导入请求携带当前所选分组，不再强制覆盖为渠道类型默认分组；服务端创建渠道前重新读取已有分组并确认选择仍然有效。
+- 单个分组支持上游已有的 Unicode 名称，但拒绝逗号分隔的多分组值。Admin Hub 因没有可代表目标站点的标准 `/api/group/` 接口，继续保持原有固定分组行为。
+
+### Testing
+
+- `node --test "test/instance-route.test.js" "test/validation.test.js"`：通过；14 项定向测试覆盖分组读取、自定义已有分组创建、失效分组拦截、中文分组和多分组拒绝。
+- `npm test`：通过；40 项测试全部通过。
+- `npm run build`：通过；Next.js 生产构建、TypeScript 检查和静态页面生成成功，新增 `/api/instances/[instanceId]/groups` 动态路由。
+- `docker compose config --quiet`：通过。
+- `git diff --check`：通过。
+- 自动化测试只使用内存数据库与本地模拟 New API；未连接或修改真实实例、分组和渠道。
+
+### Notes
+
+- `lib/new-api-client.js`：增加标准 New API 已有分组读取。
+- `app/api/instances/[instanceId]/groups/route.js`：增加实例访问权限保护的分组列表接口。
+- `app/api/instances/[instanceId]/import/route.js`：接收当前所选单个分组。
+- `lib/instance-service.js`：使用请求分组创建标准 New API 渠道，并在创建前二次校验分组存在性。
+- `lib/validation.js`：允许单个 Unicode 分组名称并拒绝逗号分隔的多分组。
+- `components/instance-workspace.js`：增加动态分组加载、下拉单选、刷新和按渠道类型保留选择。
+- `app/globals.css`：增加分组选择器的桌面和移动端样式。
+- `test/instance-route.test.js`、`test/validation.test.js`：增加动态分组和单分组规则回归测试。
+- `README.md`、`docs/nextjs-usage.md`：更新分组选择规则和 Admin Hub 边界。
+- `app/layout.js`：同步更新页面元数据描述以包含 Claude、OpenAI 与 Grok。
+- `progress.md`：追加本轮实现、验证证据和回滚方式。
+- 回滚方式：恢复上述文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。

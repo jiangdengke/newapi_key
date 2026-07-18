@@ -1,16 +1,16 @@
 # New API Key 管理系统
 
-基于 Next.js 的 New API 多实例 Claude 与 OpenAI Key 管理工具。管理员可以维护多个 New API 实例，为每个实例生成独立访问 Key；使用者通过访问 Key 进入指定实例，分别批量创建 Claude 或 OpenAI 渠道、查询本地导入历史并同步渠道状态与用量。
+基于 Next.js 的 New API 多实例 Claude、OpenAI 与 Grok Key 管理工具。管理员可以维护多个 New API 实例，为每个实例生成独立访问 Key；使用者通过访问 Key 进入指定实例，分别批量创建 Claude、OpenAI 或 Grok 渠道、查询本地导入历史并同步渠道状态与用量。
 
 ## 主要能力
 
 - 多个 New API 实例统一管理。
 - 每个实例使用独立访问 Key，访客会话仅能访问绑定实例。
-- 分别批量导入 Anthropic Key 和官方 OpenAI Key，并按实例配置的前缀、日期模式和共享序号创建渠道。
-- Claude 固定支持 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`；OpenAI 固定支持 `gpt-5.6-sol`。
-- Claude 固定使用 `anthropic` 分组，OpenAI 固定使用 `openai` 分组，无需手工配置渠道分组。
-- Claude 与 OpenAI 通过同一导入面板中的并列按钮切换，未提交的输入内容分别保留。
-- 标准 New API 和 Deepnix Admin Hub 两种连接协议均支持 Claude 与 OpenAI 渠道。
+- 分别批量导入 Anthropic Key、官方 OpenAI Key 和官方 xAI Key，并按实例配置的前缀、日期模式和共享序号创建渠道。
+- Claude 固定支持三个 Claude Opus 模型；OpenAI 固定支持 `gpt-5.6-sol`；Grok 固定支持当前 10 个 Grok 4.20、4.3、4.5、Build、Imagine 图像和视频模型。
+- 标准 New API 会动态加载当前已有分组，Claude、OpenAI、Grok 导入时均可单独选择一个分组；默认优先选择 `anthropic`、`openai`、`xai`。
+- Claude、OpenAI 与 Grok 通过同一导入面板中的并列按钮切换，未提交的输入内容分别保留。
+- 标准 New API 支持 Claude、OpenAI 与 Grok；Deepnix Admin Hub 继续支持 Claude 与 OpenAI，不提供 Grok 导入。
 - 同步渠道累计用量，并在脱敏 Key 首次开始产生用量时显示轻提示。
 - 支持实例级渠道优先级和权重。
 - SQLite 保存实例配置、访问会话和脱敏渠道历史。

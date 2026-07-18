@@ -64,7 +64,7 @@ test("validateImportInput rejects an invalid date segment", () => {
   );
 });
 
-test("validateImportInput accepts OpenAI and rejects unsupported channel kinds", () => {
+test("validateImportInput accepts OpenAI and Grok channel kinds", () => {
   const openAiImportInput = validateImportInput({
     keys: ["sk-openai-example"],
     channelKind: "openai",
@@ -75,6 +75,29 @@ test("validateImportInput accepts OpenAI and rejects unsupported channel kinds",
   });
   assert.equal(openAiImportInput.channelKind, "openai");
 
+  const grokImportInput = validateImportInput({
+    keys: ["xai-example"],
+    channelKind: "grok",
+    namePrefix: "channel",
+    dateSegment: "0714",
+    startNumber: 2,
+    group: "高级分组",
+  });
+  assert.equal(grokImportInput.channelKind, "grok");
+  assert.equal(grokImportInput.group, "高级分组");
+
+  assert.throws(
+    () => validateImportInput({
+      keys: ["xai-example"],
+      channelKind: "grok",
+      namePrefix: "channel",
+      dateSegment: "0714",
+      startNumber: 2,
+      group: "xai,premium",
+    }),
+    (error) => error instanceof ValidationError && /只能选择一个分组/.test(error.message),
+  );
+
   assert.throws(
     () => validateImportInput({
       keys: ["sk-example"],
@@ -84,7 +107,7 @@ test("validateImportInput accepts OpenAI and rejects unsupported channel kinds",
       startNumber: 1,
       group: "openai",
     }),
-    (error) => error instanceof ValidationError && /claude 或 openai/.test(error.message),
+    (error) => error instanceof ValidationError && /claude、openai 或 grok/.test(error.message),
   );
 });
 

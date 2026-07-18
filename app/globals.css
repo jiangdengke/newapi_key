@@ -269,6 +269,38 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.channel-group-field {
+  margin-bottom: 20px;
+}
+
+.channel-group-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.channel-group-picker select {
+  min-width: 0;
+}
+
+.channel-group-picker .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.channel-group-message {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+@media (max-width: 560px) {
+  .channel-group-picker {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .application-shell {
   min-height: 100vh;
 }
@@ -1165,6 +1197,10 @@ textarea:focus {
   background: #f3f5f9;
 }
 
+.channel-kind-switch.three-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .channel-kind-option {
   min-height: 44px;
   padding: 0 18px;
@@ -1186,4 +1222,11 @@ textarea:focus {
   color: var(--primary-dark);
   background: #fff;
   box-shadow: 0 4px 12px rgba(53, 104, 232, 0.12);
+}
+
+@media (max-width: 560px) {
+  .channel-kind-switch.three-options .channel-kind-option {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
 }

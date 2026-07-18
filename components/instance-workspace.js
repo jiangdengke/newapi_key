@@ -10,6 +10,56 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS = 30_000;
 const CLAUDE_CHANNEL_KIND = "claude";
 const OPENAI_CHANNEL_KIND = "openai";
+const GROK_CHANNEL_KIND = "grok";
+const CHANNEL_KIND_DETAILS = Object.freeze({
+  [CLAUDE_CHANNEL_KIND]: Object.freeze({
+    label: "Claude",
+    keyLabel: "Anthropic Key",
+    keyPlaceholder: "每行粘贴一个 Anthropic Key",
+    description: "使用 Anthropic Key，固定创建现有三个 Claude Opus 模型",
+    defaultGroup: "anthropic",
+  }),
+  [OPENAI_CHANNEL_KIND]: Object.freeze({
+    label: "OpenAI",
+    keyLabel: "OpenAI Key",
+    keyPlaceholder: "每行粘贴一个官方 OpenAI Key",
+    description: "使用官方 OpenAI Key，固定模型为 gpt-5.6-sol",
+    defaultGroup: "openai",
+  }),
+  [GROK_CHANNEL_KIND]: Object.freeze({
+    label: "Grok",
+    keyLabel: "xAI Key",
+    keyPlaceholder: "每行粘贴一个官方 xAI Key",
+    description: "使用官方 xAI Key，固定创建 10 个 Grok 模型",
+    defaultGroup: "xai",
+  }),
+});
+
+function createDefaultSelectedGroups() {
+  return Object.fromEntries(
+    Object.entries(CHANNEL_KIND_DETAILS).map(([channelKind, channelDetails]) => (
+      [channelKind, channelDetails.defaultGroup]
+    )),
+  );
+}
+
+function getChannelKindDetails(channelKind) {
+  return CHANNEL_KIND_DETAILS[channelKind] ?? CHANNEL_KIND_DETAILS[CLAUDE_CHANNEL_KIND];
+}
+
+function getChannelKindLabel(channelKind) {
+  return getChannelKindDetails(channelKind).label;
+}
+
+function chooseAvailableGroup(availableGroups, currentGroup, defaultGroup) {
+  if (availableGroups.includes(currentGroup)) {
+    return currentGroup;
+  }
+  if (availableGroups.includes(defaultGroup)) {
+    return defaultGroup;
+  }
+  return availableGroups[0] ?? "";
+}
 
 function createInitialProgress() {
   return {
@@ -82,7 +132,12 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   const [configuration, setConfiguration] = useState(null);
   const [claudeKeysText, setClaudeKeysText] = useState("");
   const [openAiKeysText, setOpenAiKeysText] = useState("");
+  const [grokKeysText, setGrokKeysText] = useState("");
   const [selectedChannelKind, setSelectedChannelKind] = useState(CLAUDE_CHANNEL_KIND);
+  const [availableGroups, setAvailableGroups] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState(createDefaultSelectedGroups);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(false);
+  const [groupError, setGroupError] = useState("");
   const [progress, setProgress] = useState(createInitialProgress);
   const [isImporting, setIsImporting] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
@@ -106,6 +161,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   const [pageError, setPageError] = useState("");
   const synchronizationInProgressRef = useRef(false);
   const automaticSynchronizationRef = useRef(null);
+  const groupRequestVersionRef = useRef(0);
   const uniqueClaudeKeys = useMemo(
     () => normalizeKeyLines(claudeKeysText),
     [claudeKeysText],
@@ -114,10 +170,56 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     () => normalizeKeyLines(openAiKeysText),
     [openAiKeysText],
   );
+  const uniqueGrokKeys = useMemo(
+    () => normalizeKeyLines(grokKeysText),
+    [grokKeysText],
+  );
 
   async function loadConfiguration() {
     const responsePayload = await requestJson(`/api/instances/${instanceId}/config`);
     setConfiguration(responsePayload.data);
+  }
+
+  async function loadAvailableGroups({ showSuccess = false } = {}) {
+    const requestVersion = groupRequestVersionRef.current + 1;
+    groupRequestVersionRef.current = requestVersion;
+    setIsLoadingGroups(true);
+    setGroupError("");
+    try {
+      const responsePayload = await requestJson(`/api/instances/${instanceId}/groups`);
+      if (groupRequestVersionRef.current !== requestVersion) {
+        return;
+      }
+      const loadedGroups = responsePayload.data.groups;
+      setAvailableGroups(loadedGroups);
+      setSelectedGroups((currentSelectedGroups) => Object.fromEntries(
+        Object.entries(CHANNEL_KIND_DETAILS).map(([channelKind, channelDetails]) => [
+          channelKind,
+          chooseAvailableGroup(
+            loadedGroups,
+            currentSelectedGroups[channelKind],
+            channelDetails.defaultGroup,
+          ),
+        ]),
+      ));
+      if (loadedGroups.length === 0) {
+        setGroupError("当前 New API 没有可选分组");
+      } else if (showSuccess) {
+        showToast(`已刷新 ${loadedGroups.length} 个可用分组`, { type: "success" });
+      }
+    } catch (error) {
+      if (groupRequestVersionRef.current !== requestVersion) {
+        return;
+      }
+      const errorMessage = error?.message || "读取 New API 分组失败";
+      setAvailableGroups([]);
+      setGroupError(errorMessage);
+      showToast(errorMessage, { type: "error" });
+    } finally {
+      if (groupRequestVersionRef.current === requestVersion) {
+        setIsLoadingGroups(false);
+      }
+    }
   }
 
   async function loadHistory(nextQuery = historyQuery) {
@@ -145,8 +247,13 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
 
   useEffect(() => {
     let isActive = true;
+    groupRequestVersionRef.current += 1;
     setConfiguration(null);
     setPageError("");
+    setAvailableGroups([]);
+    setSelectedGroups(createDefaultSelectedGroups());
+    setIsLoadingGroups(false);
+    setGroupError("");
     setHistoryQuery({ key: "", page: 1, pageSize: DEFAULT_PAGE_SIZE });
     setHistorySearchInput("");
     Promise.all([
@@ -179,11 +286,24 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     };
   }, [instanceId]);
 
+  useEffect(() => {
+    if (configuration?.instance.connectionProtocol === "new-api") {
+      loadAvailableGroups();
+    }
+  }, [instanceId, configuration?.instance.connectionProtocol]);
+
+  useEffect(() => {
+    if (
+      configuration?.instance.connectionProtocol !== "new-api"
+      && selectedChannelKind === GROK_CHANNEL_KIND
+    ) {
+      setSelectedChannelKind(CLAUDE_CHANNEL_KIND);
+    }
+  }, [configuration, selectedChannelKind]);
+
   function processProgressEvent(event, successfulKeyIndexes) {
     if (event.type === "ready") {
-      const channelKindLabel = event.channelKind === OPENAI_CHANNEL_KIND
-        ? "OpenAI"
-        : "Claude";
+      const channelKindLabel = getChannelKindLabel(event.channelKind);
       setProgress((current) => ({
         ...current,
         summary: (
@@ -251,10 +371,34 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
 
   async function importChannels(event, channelKind) {
     event.preventDefault();
-    const isOpenAiImport = channelKind === OPENAI_CHANNEL_KIND;
-    const uniqueKeys = isOpenAiImport ? uniqueOpenAiKeys : uniqueClaudeKeys;
-    const setKeysText = isOpenAiImport ? setOpenAiKeysText : setClaudeKeysText;
-    const channelKindLabel = isOpenAiImport ? "OpenAI" : "Claude";
+    const importInputByChannelKind = {
+      [CLAUDE_CHANNEL_KIND]: {
+        uniqueKeys: uniqueClaudeKeys,
+        setKeysText: setClaudeKeysText,
+      },
+      [OPENAI_CHANNEL_KIND]: {
+        uniqueKeys: uniqueOpenAiKeys,
+        setKeysText: setOpenAiKeysText,
+      },
+      [GROK_CHANNEL_KIND]: {
+        uniqueKeys: uniqueGrokKeys,
+        setKeysText: setGrokKeysText,
+      },
+    };
+    const selectedImportInput = importInputByChannelKind[channelKind]
+      ?? importInputByChannelKind[CLAUDE_CHANNEL_KIND];
+    const { uniqueKeys, setKeysText } = selectedImportInput;
+    const channelKindLabel = getChannelKindLabel(channelKind);
+    const requiresGroupSelection = (
+      configuration?.instance.connectionProtocol === "new-api"
+    );
+    const selectedGroup = selectedGroups[channelKind] ?? "";
+    if (requiresGroupSelection && !availableGroups.includes(selectedGroup)) {
+      const errorMessage = groupError || "请先选择一个当前可用的分组";
+      setPageError(errorMessage);
+      showToast(errorMessage, { type: "error" });
+      return;
+    }
     if (uniqueKeys.length === 0) {
       const errorMessage = `请至少填写一个 ${channelKindLabel} Key`;
       setPageError(errorMessage);
@@ -273,7 +417,11 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       const response = await fetch(`/api/instances/${instanceId}/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keys: uniqueKeys, channelKind }),
+        body: JSON.stringify({
+          keys: uniqueKeys,
+          channelKind,
+          ...(requiresGroupSelection ? { group: selectedGroup } : {}),
+        }),
       });
       if (!response.ok || !response.body) {
         await readJsonResponse(response);
@@ -441,10 +589,42 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   }
 
   const instance = configuration.instance;
+  const supportsGrokImport = instance.connectionProtocol === "new-api";
+  const isClaudeSelected = selectedChannelKind === CLAUDE_CHANNEL_KIND;
   const isOpenAiSelected = selectedChannelKind === OPENAI_CHANNEL_KIND;
-  const selectedChannelLabel = isOpenAiSelected ? "OpenAI" : "Claude";
-  const selectedKeysText = isOpenAiSelected ? openAiKeysText : claudeKeysText;
-  const selectedUniqueKeys = isOpenAiSelected ? uniqueOpenAiKeys : uniqueClaudeKeys;
+  const isGrokSelected = selectedChannelKind === GROK_CHANNEL_KIND;
+  const selectedChannelDetails = getChannelKindDetails(selectedChannelKind);
+  const selectedInputByChannelKind = {
+    [CLAUDE_CHANNEL_KIND]: {
+      keysText: claudeKeysText,
+      uniqueKeys: uniqueClaudeKeys,
+      setKeysText: setClaudeKeysText,
+    },
+    [OPENAI_CHANNEL_KIND]: {
+      keysText: openAiKeysText,
+      uniqueKeys: uniqueOpenAiKeys,
+      setKeysText: setOpenAiKeysText,
+    },
+    [GROK_CHANNEL_KIND]: {
+      keysText: grokKeysText,
+      uniqueKeys: uniqueGrokKeys,
+      setKeysText: setGrokKeysText,
+    },
+  };
+  const selectedInput = selectedInputByChannelKind[selectedChannelKind]
+    ?? selectedInputByChannelKind[CLAUDE_CHANNEL_KIND];
+  const supportsGroupSelection = instance.connectionProtocol === "new-api";
+  const selectedGroup = selectedGroups[selectedChannelKind] ?? "";
+  const selectedAvailableGroup = availableGroups.includes(selectedGroup)
+    ? selectedGroup
+    : "";
+  const isGroupSelectionUnavailable = (
+    supportsGroupSelection
+    && (isLoadingGroups || !selectedAvailableGroup)
+  );
+  const selectedChannelDescription = supportsGroupSelection
+    ? `${selectedChannelDetails.description}，分组从当前 New API 已有分组中选择。`
+    : `${selectedChannelDetails.description}，分组固定为 ${selectedChannelDetails.defaultGroup}。`;
   const progressPercentage = progress.total > 0
     ? Math.round((progress.completed / progress.total) * 100)
     : 0;
@@ -470,11 +650,14 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
         autoComplete="off"
       >
         <section className="panel">
-          <div className="channel-kind-switch" aria-label="选择导入渠道类型">
+          <div
+            className={`channel-kind-switch ${supportsGrokImport ? "three-options" : ""}`}
+            aria-label="选择导入渠道类型"
+          >
             <button
-              className={`channel-kind-option ${!isOpenAiSelected ? "active" : ""}`}
+              className={`channel-kind-option ${isClaudeSelected ? "active" : ""}`}
               type="button"
-              aria-pressed={!isOpenAiSelected}
+              aria-pressed={isClaudeSelected}
               disabled={isImporting}
               onClick={() => setSelectedChannelKind(CLAUDE_CHANNEL_KIND)}
             >
@@ -489,43 +672,80 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
             >
               OpenAI 渠道
             </button>
+            {supportsGrokImport ? (
+              <button
+                className={`channel-kind-option ${isGrokSelected ? "active" : ""}`}
+                type="button"
+                aria-pressed={isGrokSelected}
+                disabled={isImporting}
+                onClick={() => setSelectedChannelKind(GROK_CHANNEL_KIND)}
+              >
+                Grok 渠道
+              </button>
+            ) : null}
           </div>
           <div className="panel-heading">
             <div>
-              <h2>导入 {selectedChannelLabel} 渠道</h2>
-              <p>
-                {isOpenAiSelected
-                  ? "使用官方 OpenAI Key，固定模型为 gpt-5.6-sol，分组为 openai。"
-                  : "使用 Anthropic Key，固定创建现有三个 Claude Opus 模型，分组为 anthropic。"}
-              </p>
+              <h2>导入 {selectedChannelDetails.label} 渠道</h2>
+              <p>{selectedChannelDescription}</p>
             </div>
           </div>
+          {supportsGroupSelection ? (
+            <label className="field channel-group-field">
+              <span>分组</span>
+              <div className="channel-group-picker">
+                <select
+                  value={selectedAvailableGroup}
+                  disabled={!instance.enabled || isImporting || isLoadingGroups}
+                  onChange={(event) => setSelectedGroups((currentSelectedGroups) => ({
+                    ...currentSelectedGroups,
+                    [selectedChannelKind]: event.target.value,
+                  }))}
+                  required
+                >
+                  {availableGroups.length === 0 ? (
+                    <option value="">
+                      {isLoadingGroups ? "正在加载分组..." : "没有可用分组"}
+                    </option>
+                  ) : availableGroups.map((group) => (
+                    <option key={group} value={group}>{group}</option>
+                  ))}
+                </select>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  disabled={!instance.enabled || isImporting || isLoadingGroups}
+                  onClick={() => loadAvailableGroups({ showSuccess: true })}
+                >
+                  {isLoadingGroups ? "加载中..." : "刷新分组"}
+                </button>
+              </div>
+              {groupError ? <small className="channel-group-message">{groupError}</small> : null}
+            </label>
+          ) : null}
           <label className="field">
-            <span>{isOpenAiSelected ? "OpenAI Key" : "Anthropic Key"}</span>
+            <span>{selectedChannelDetails.keyLabel}</span>
             <textarea
               rows="7"
-              placeholder={isOpenAiSelected
-                ? "每行粘贴一个官方 OpenAI Key"
-                : "每行粘贴一个 Anthropic Key"}
+              placeholder={selectedChannelDetails.keyPlaceholder}
               spellCheck="false"
-              value={selectedKeysText}
-              onChange={(event) => {
-                if (isOpenAiSelected) {
-                  setOpenAiKeysText(event.target.value);
-                } else {
-                  setClaudeKeysText(event.target.value);
-                }
-              }}
+              value={selectedInput.keysText}
+              onChange={(event) => selectedInput.setKeysText(event.target.value)}
               disabled={!instance.enabled || isImporting}
               required
             />
           </label>
           <div className="key-summary">
-            <span>共 {selectedUniqueKeys.length} 个有效 {selectedChannelLabel} Key</span>
+            <span>
+              共 {selectedInput.uniqueKeys.length} 个有效 {selectedChannelDetails.label} Key
+            </span>
           </div>
           <div className="submit-row">
-            <button className="button button-primary" disabled={!instance.enabled || isImporting}>
-              {isImporting ? "正在创建..." : `开始创建 ${selectedChannelLabel} 渠道`}
+            <button
+              className="button button-primary"
+              disabled={!instance.enabled || isImporting || isGroupSelectionUnavailable}
+            >
+              {isImporting ? "正在创建..." : `开始创建 ${selectedChannelDetails.label} 渠道`}
             </button>
           </div>
         </section>

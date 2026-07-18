@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 
+import { GET as getInstanceGroups } from "../app/api/instances/[instanceId]/groups/route.js";
 import { POST as importChannels } from "../app/api/instances/[instanceId]/import/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
 import { SESSION_COOKIE_NAME } from "../lib/http.js";
@@ -12,12 +13,26 @@ const ADMINISTRATOR_PASSWORD = "administrator-password";
 const NEW_API_PASSWORD = "new-api-administrator-password";
 const IMPORT_KEYS = ["sk-ant-success-example", "sk-ant-failure-example"];
 const OPENAI_IMPORT_KEY = "sk-openai-success-example";
+const GROK_IMPORT_KEY = "xai-success-example";
+const AVAILABLE_GROUPS = ["anthropic", "openai", "xai", "premium"];
 const CLAUDE_MODELS = [
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
 ];
 const OPENAI_MODELS = ["gpt-5.6-sol"];
+const GROK_MODELS = [
+  "grok-4.20-0309-non-reasoning",
+  "grok-4.20-0309-reasoning",
+  "grok-4.20-multi-agent-0309",
+  "grok-4.3",
+  "grok-4.5",
+  "grok-build-0.1",
+  "grok-imagine-image",
+  "grok-imagine-image-quality",
+  "grok-imagine-video",
+  "grok-imagine-video-1.5",
+];
 
 function createSilentLogger() {
   return {
@@ -107,6 +122,16 @@ function createMockNewApiServer(createdChannelRequests, storedChannels) {
       sendJson(response, {
         success: true,
         data: { items: matchingChannels, total: matchingChannels.length },
+      });
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/group/") {
+      assert.equal(request.headers.cookie, "session=mock-session");
+      assert.equal(request.headers["new-api-user"], "1");
+      sendJson(response, {
+        success: true,
+        data: AVAILABLE_GROUPS,
       });
       return;
     }
@@ -275,6 +300,7 @@ function createImportRequest(
   sessionToken,
   keys = IMPORT_KEYS,
   channelKind = undefined,
+  group = undefined,
 ) {
   return new Request(`http://localhost/api/instances/${instanceId}/import`, {
     method: "POST",
@@ -286,7 +312,17 @@ function createImportRequest(
     body: JSON.stringify({
       keys,
       ...(channelKind ? { channelKind } : {}),
+      ...(group ? { group } : {}),
     }),
+  });
+}
+
+function createInstanceGetRequest(instanceId, sessionToken, pathname) {
+  return new Request(`http://localhost/api/instances/${instanceId}/${pathname}`, {
+    headers: {
+      Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}`,
+      Host: "localhost",
+    },
   });
 }
 
@@ -487,6 +523,136 @@ test("standard New API import creates an official OpenAI channel", async () => {
   }
 });
 
+test("standard New API import creates an official xAI Grok channel", async () => {
+  const createdChannelRequests = [];
+  const storedChannels = [{
+    id: 106,
+    type: 1,
+    name: "channel-0711-106",
+    group: "openai",
+    models: OPENAI_MODELS.join(","),
+    status: 1,
+    used_quota: 0,
+  }];
+  const mockNewApiServer = createMockNewApiServer(
+    createdChannelRequests,
+    storedChannels,
+  );
+  const mockNewApiBaseUrl = await listenOnAvailablePort(mockNewApiServer);
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 23),
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+
+  try {
+    const instance = store.createInstance({
+      name: "Mock Grok instance",
+      baseUrl: mockNewApiBaseUrl,
+      username: "new-api-administrator",
+      password: NEW_API_PASSWORD,
+      group: "anthropic",
+      namePrefix: "channel",
+      startNumber: 1,
+      continueFromExisting: true,
+      priority: 8,
+      weight: 18,
+      dateMode: "0711",
+      enabled: true,
+    });
+    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+
+    const groupsResponse = await getInstanceGroups(
+      createInstanceGetRequest(instance.id, session.token, "groups"),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal(groupsResponse.status, 200);
+    assert.deepEqual(await groupsResponse.json(), {
+      success: true,
+      data: { groups: AVAILABLE_GROUPS },
+    });
+
+    const response = await importChannels(
+      createImportRequest(
+        instance.id,
+        session.token,
+        [GROK_IMPORT_KEY],
+        "grok",
+        "premium",
+      ),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+
+    assert.equal(response.status, 200);
+    const responseText = await response.text();
+    const progressEvents = responseText.trim().split("\n").map(JSON.parse);
+    assert.equal(progressEvents[0].channelKind, "grok");
+    assert.deepEqual(progressEvents.at(-1), {
+      type: "complete",
+      total: 1,
+      completed: 1,
+      success: 1,
+      failure: 0,
+    });
+    assert.equal(responseText.includes(GROK_IMPORT_KEY), false);
+
+    assert.equal(createdChannelRequests.length, 1);
+    const createdChannel = createdChannelRequests[0].channel;
+    assert.equal(createdChannel.type, 48);
+    assert.equal(createdChannel.name, "channel-0711-107");
+    assert.equal(createdChannel.key, GROK_IMPORT_KEY);
+    assert.equal(createdChannel.models, GROK_MODELS.join(","));
+    assert.equal(createdChannel.group, "premium");
+    assert.equal(createdChannel.base_url, "");
+    assert.equal(createdChannel.priority, 8);
+    assert.equal(createdChannel.weight, 18);
+
+    const synchronization = await synchronizeInstanceRecords(
+      instance.id,
+      "standard-grok-sync-test",
+    );
+    assert.equal(synchronization.synchronizedCount, 1);
+    assert.equal(synchronization.missingCount, 0);
+    const importedRecords = store.listRecords(instance.id);
+    assert.equal(importedRecords.length, 1);
+    assert.deepEqual(importedRecords[0].models, GROK_MODELS);
+
+    const invalidGroupKey = "xai-invalid-group-example";
+    const invalidGroupResponse = await importChannels(
+      createImportRequest(
+        instance.id,
+        session.token,
+        [invalidGroupKey],
+        "grok",
+        "removed-group",
+      ),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal(invalidGroupResponse.status, 200);
+    const invalidGroupResponseText = await invalidGroupResponse.text();
+    const invalidGroupEvents = invalidGroupResponseText.trim().split("\n").map(JSON.parse);
+    assert.deepEqual(invalidGroupEvents.at(-1), {
+      type: "fatal",
+      message: "所选分组 removed-group 已不存在，请刷新分组后重新选择",
+      completed: 0,
+      success: 0,
+      failure: 0,
+    });
+    assert.equal(invalidGroupResponseText.includes(invalidGroupKey), false);
+    assert.equal(createdChannelRequests.length, 1);
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+    await closeServer(mockNewApiServer);
+  }
+});
+
 test("Admin Hub import targets AGT site 13 and synchronizes channel metrics", async () => {
   const createdChannelRequests = [];
   const observedSiteIds = [];
@@ -680,6 +846,22 @@ test("Admin Hub import creates and synchronizes an official OpenAI channel", asy
     assert.equal(importedRecords[0].newApiChannelId, 701);
     assert.equal(importedRecords[0].models[0], OPENAI_MODELS[0]);
     assert.equal(importedRecords[0].usedUsd, 1);
+
+    const unsupportedGrokResponse = await importChannels(
+      createImportRequest(
+        instance.id,
+        session.token,
+        [GROK_IMPORT_KEY],
+        "grok",
+      ),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal(unsupportedGrokResponse.status, 400);
+    assert.deepEqual(await unsupportedGrokResponse.json(), {
+      success: false,
+      message: "Grok 渠道仅支持标准 New API 实例",
+    });
+    assert.equal(createdChannelRequests.length, 1);
   } finally {
     restoreRuntimeContext();
     store.close();

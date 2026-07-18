@@ -28,6 +28,7 @@ export async function POST(request, { params }) {
       requestBody?.keys,
       requestId,
       requestBody?.channelKind,
+      requestBody?.group,
     );
     const eventIterator = channelImport.events();
     const textEncoder = new TextEncoder();
