@@ -634,6 +634,34 @@ p {
   resize: vertical;
 }
 
+.textarea.has-issues {
+  border-color: color-mix(in srgb, var(--warning) 60%, var(--input));
+}
+
+.input-issues {
+  display: grid;
+  gap: 4px;
+  margin-top: -6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.input-issues strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.input-issues ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .textarea-mono {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -1998,6 +2026,10 @@ p {
 
 .toast-success .toast-icon {
   color: var(--success);
+}
+
+.toast-warning .toast-icon {
+  color: var(--warning);
 }
 
 .toast-error .toast-icon {

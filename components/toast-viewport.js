@@ -1,19 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleAlert, CircleCheck, Info, X } from "lucide-react";
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 
 import { TOAST_EVENT_NAME } from "../lib/toast.js";
 
 const TOAST_ICONS = Object.freeze({
   success: CircleCheck,
   info: Info,
+  warning: TriangleAlert,
   error: CircleAlert,
 });
 
 const TOAST_LIFETIMES = Object.freeze({
   success: 3_500,
   info: 4_500,
+  warning: 6_000,
   error: 7_000,
 });
 
@@ -31,7 +33,7 @@ export default function ToastViewport() {
     function handleToast(event) {
       const toastId = nextToastId.current;
       nextToastId.current += 1;
-      const toastType = ["success", "info", "error"].includes(event.detail?.type)
+      const toastType = ["success", "info", "warning", "error"].includes(event.detail?.type)
         ? event.detail.type
         : "info";
       setToasts((currentToasts) => [

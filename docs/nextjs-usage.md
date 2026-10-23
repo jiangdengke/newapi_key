@@ -100,7 +100,7 @@ New API 管理员密码只在新建实例时填写，编辑实例不提供修改
 | 渠道类型 | Claude 使用 New API 类型编号 `14`；OpenAI 使用类型编号 `1`；Grok 使用 xAI 类型编号 `48`；AWS 使用 Amazon Bedrock 类型编号 `33` |
 | 模型 | 取实例为该渠道类型配置的默认模型，访问者导入时可临时增删，只影响这一批渠道；未配置时 Claude 为 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`，OpenAI 为 `gpt-5.6-sol`，Grok 为下方列出的 10 个模型，AWS 与 Claude 相同 |
 | Key 来源 | Claude 接收 Anthropic Key；OpenAI 仅接收官方 OpenAI Key；Grok 仅接收官方 xAI Key；AWS 每行接收 `AccessKey|SecretAccessKey|Region` 或 `APIKey|Region`；均不提供自定义兼容接口 Base URL |
-| AWS 设置 | 按每行凭证的分段数自动识别密钥格式，写入渠道设置 `aws_key_type`（`ak_sk` 或 `api_key`），两种格式可混在同一批；导入时可选 AWS 接口 `aws_api_type`：InvokeModel（默认，旧接口）或 Mantle（Messages API）；默认优先选择 `aws` 分组 |
+| AWS 设置 | 按每行凭证的分段数自动识别密钥格式，写入渠道设置 `aws_key_type`（`ak_sk` 或 `api_key`），两种格式可混在同一批；导入页会逐行检查凭证，列出缺少区域、区域无效、分段不对等问题及所在行号，有问题时不会提交；导入时可选 AWS 接口 `aws_api_type`：InvokeModel（默认，旧接口）或 Mantle（Messages API）；默认优先选择 `aws` 分组 |
 | 分组 | 从当前实例已有分组中单选；Claude、OpenAI、Grok 分别优先默认选择 `anthropic`、`openai`、`xai` |
 | 名称 | 三类渠道都使用实例配置的名称前缀和日期模式，并共享序号避让；例如 `channel-0714-001` 或 `channel-001` |
 | 优先级和权重 | 由实例配置决定，新建渠道时写入 New API；现有实例升级后默认为 `0` 和 `0` |

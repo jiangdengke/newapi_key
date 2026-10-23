@@ -703,7 +703,7 @@ test("AWS import creates type 33 channels with key type and interface settings",
       { params: Promise.resolve({ instanceId: String(instance.id) }) },
     );
     assert.equal(invalidResponse.status, 400);
-    assert.match((await invalidResponse.json()).message, /AWS 凭证格式无效/);
+    assert.match((await invalidResponse.json()).message, /第 1 个 AWS 凭证的最后一段不是有效区域/);
   } finally {
     restoreRuntimeContext();
     store.close();

@@ -12,13 +12,14 @@ import {
   ListChecks,
   RefreshCw,
   Rocket,
+  TriangleAlert,
   Wallet,
 } from "lucide-react";
 
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
 import { formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
-import { parseAwsCredential } from "../lib/validation.js";
+import { diagnoseAwsCredential, parseAwsCredential } from "../lib/validation.js";
 import RecordFilterBar, {
   CHANNEL_KIND_FILTER_LABELS,
   createRecordQuery,
@@ -86,7 +87,7 @@ const CHANNEL_KIND_DETAILS = Object.freeze({
   [AWS_CHANNEL_KIND]: Object.freeze({
     label: "AWS",
     keyLabel: "AWS 凭证",
-    keyPlaceholder: "每行一个凭证：\nAccessKey|SecretAccessKey|Region\n或 APIKey|Region",
+    keyPlaceholder: "每行一个凭证，末尾带上区域：\nAPIKey|us-east-1\nAccessKey|SecretAccessKey|us-west-2",
     description: "使用 Amazon Bedrock 凭证创建 AWS 渠道，每行可以是 AK/SK 或 API Key",
     defaultGroup: "aws",
   }),
@@ -123,22 +124,29 @@ function hasSameModels(firstModels, secondModels) {
     && firstModels.every((model, modelIndex) => model === secondModels[modelIndex]);
 }
 
-function describeAwsCredentials(credentials) {
+const MAXIMUM_VISIBLE_CREDENTIAL_ISSUES = 5;
+
+function findAwsCredentialIssues(rawText) {
+  return String(rawText).split(/\r?\n/).flatMap((line, lineIndex) => {
+    const credential = line.trim();
+    const problem = credential ? diagnoseAwsCredential(credential) : null;
+    return problem ? [{ lineNumber: lineIndex + 1, problem }] : [];
+  });
+}
+
+function describeAwsCredentials(credentials, issueCount) {
   let accessKeyCount = 0;
   let apiKeyCount = 0;
-  let invalidCount = 0;
   for (const credential of credentials) {
-    const parsedCredential = parseAwsCredential(credential);
-    if (!parsedCredential) {
-      invalidCount += 1;
-    } else if (parsedCredential.keyType === "ak_sk") {
+    const keyType = parseAwsCredential(credential)?.keyType;
+    if (keyType === "ak_sk") {
       accessKeyCount += 1;
-    } else {
+    } else if (keyType === "api_key") {
       apiKeyCount += 1;
     }
   }
   return `AK/SK ${accessKeyCount} 个 · API Key ${apiKeyCount} 个`
-    + (invalidCount > 0 ? ` · ${invalidCount} 个格式无效` : "");
+    + (issueCount > 0 ? ` · ${issueCount} 行待修改` : "");
 }
 
 function createInitialProgress() {
@@ -242,6 +250,11 @@ export default function InstanceWorkspace({
     () => normalizeKeyLines(awsKeysText),
     [awsKeysText],
   );
+  const awsCredentialIssues = useMemo(
+    () => findAwsCredentialIssues(awsKeysText),
+    [awsKeysText],
+  );
+  const awsKeysInputRef = useRef(null);
 
   async function loadConfiguration() {
     const responsePayload = await requestJson(`/api/instances/${instanceId}/config`);
@@ -489,6 +502,17 @@ export default function InstanceWorkspace({
       const errorMessage = `请至少填写一个 ${channelKindLabel} Key`;
       setPageError(errorMessage);
       showToast(errorMessage, { type: "error" });
+      return;
+    }
+    if (channelKind === AWS_CHANNEL_KIND && awsCredentialIssues.length > 0) {
+      const [firstIssue] = awsCredentialIssues;
+      showToast(
+        awsCredentialIssues.length === 1
+          ? `第 ${firstIssue.lineNumber} 行${firstIssue.problem}`
+          : `有 ${awsCredentialIssues.length} 行 AWS 凭证需要修改，详见输入框下方`,
+        { type: "warning" },
+      );
+      awsKeysInputRef.current?.focus();
       return;
     }
     setPageError("");
@@ -833,22 +857,42 @@ export default function InstanceWorkspace({
               extra={(
                 <span className="field-counter">
                   {selectedChannelKind === AWS_CHANNEL_KIND
-                    ? describeAwsCredentials(uniqueAwsKeys)
+                    ? describeAwsCredentials(uniqueAwsKeys, awsCredentialIssues.length)
                     : `共 ${selectedInput.uniqueKeys.length} 个有效 Key`}
                 </span>
               )}
             >
               <textarea
-                className="textarea textarea-mono"
+                ref={selectedChannelKind === AWS_CHANNEL_KIND ? awsKeysInputRef : undefined}
+                className={`textarea textarea-mono ${
+                  selectedChannelKind === AWS_CHANNEL_KIND && awsCredentialIssues.length > 0 ? "has-issues" : ""
+                }`}
                 rows="10"
                 placeholder={selectedChannelDetails.keyPlaceholder}
                 spellCheck="false"
                 value={selectedInput.keysText}
                 onChange={(event) => selectedInput.setKeysText(event.target.value)}
                 disabled={!instance.enabled || isImporting}
+                aria-invalid={selectedChannelKind === AWS_CHANNEL_KIND && awsCredentialIssues.length > 0}
                 required
               />
             </Field>
+            {selectedChannelKind === AWS_CHANNEL_KIND && awsCredentialIssues.length > 0 ? (
+              <div className="input-issues" role="status">
+                <strong>
+                  <TriangleAlert size={14} aria-hidden="true" />
+                  {awsCredentialIssues.length} 行需要修改
+                </strong>
+                <ul>
+                  {awsCredentialIssues.slice(0, MAXIMUM_VISIBLE_CREDENTIAL_ISSUES).map((issue) => (
+                    <li key={issue.lineNumber}>第 {issue.lineNumber} 行{issue.problem}</li>
+                  ))}
+                </ul>
+                {awsCredentialIssues.length > MAXIMUM_VISIBLE_CREDENTIAL_ISSUES ? (
+                  <span>还有 {awsCredentialIssues.length - MAXIMUM_VISIBLE_CREDENTIAL_ISSUES} 行未列出</span>
+                ) : null}
+              </div>
+            ) : null}
             {!instance.enabled ? (
               <p className="callout callout-warning">该实例已停用，暂时无法导入渠道。</p>
             ) : null}

@@ -1473,3 +1473,16 @@
 - `npm test`：50 项全部通过，新增凭证解析、导入校验和创建 type 33 渠道及 settings 的测试。
 - `npm run build`：通过。
 - 本地 rc.45 加 Playwright 端到端 6 项全部通过：无效凭证被拒绝且反馈显示原因，AK/SK 和 API Key 各一条导入成功，上游渠道类型 `33`、`aws_key_type` 分别为 `ak_sk` 和 `api_key`、接口为 `mantle`，记录类型筛选统计 AWS。
+
+## 2026-10-23 - Task: AWS 凭证逐行提示
+
+### What was done
+
+- 撤回“默认区域补全”：AWS 凭证本身应包含区域，继续要求 `APIKey|Region` 或 `AccessKey|SecretAccessKey|Region`。
+- 新增逐行诊断：缺少区域、像 AK/SK 但缺少区域、最后一段不是有效区域、分段太多、有空分段、AccessKey 格式不对、Secret 或 API Key 太短；提示不回显凭证内容。
+- 导入页在输入框下方列出问题行（按输入框实际行号，最多列 5 行），计数显示待修改行数；提交前在前端拦截并弹出警告轻提示、聚焦输入框，不再发送请求；新增 warning 类型的轻提示。后端使用同一诊断给出具体报错。
+
+### Testing
+
+- `npm test`：51 项全部通过，新增诊断文案及不回显凭证的测试。
+- 本地 rc.45 加 Playwright：问题行和行号正确，提交被拦截且未发送请求，单个问题时轻提示直接说明原因，修正后 2 个渠道导入成功。

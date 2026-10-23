@@ -11,6 +11,7 @@ import {
   validateModelList,
   ValidationError,
   DEFAULT_CHANNEL_MODELS,
+  diagnoseAwsCredential,
   parseAwsCredential,
 } from "../lib/validation.js";
 
@@ -276,6 +277,28 @@ test("validateImportInput validates AWS credentials and interface type", () => {
   assert.throws(() => validateImportInput({ ...baseInput, awsApiType: "converse" }), /AWS 接口必须是/);
   assert.throws(
     () => validateImportInput({ ...baseInput, keys: [baseInput.keys[0], "not-an-aws-key"] }),
-    /第 2 个 AWS 凭证格式无效/,
+    /第 2 个 AWS 凭证缺少区域，请在末尾加上 \|区域/,
   );
+});
+
+test("diagnoseAwsCredential explains what is wrong without echoing the credential", () => {
+  const problems = {
+    "LLM_000000000000000_ExampleBedrockKey": /^缺少区域/,
+    "AKIAEXAMPLE000000001|exampleSecretAccessKey000000001": /^像是 AK\/SK 但缺少区域/,
+    "ABSKexampleBedrockApiKey0001|useast1": /最后一段不是有效区域/,
+    "a|b|c|d": /^分段太多/,
+    "ABSKexampleBedrockApiKey0001||us-east-1": /^有空的分段/,
+    "AK|exampleSecretAccessKey000000001|us-east-1": /AccessKey 格式不对/,
+    "AKIAEXAMPLE000000001|short|us-east-1": /SecretAccessKey 太短/,
+    "short|us-east-1": /API Key 太短/,
+  };
+  for (const [credential, expectedProblem] of Object.entries(problems)) {
+    const problem = diagnoseAwsCredential(credential);
+    assert.match(problem, expectedProblem, credential);
+    for (const segment of credential.split("|").filter((part) => part.length > 6)) {
+      assert.equal(problem.includes(segment), false, `problem echoes ${segment}`);
+    }
+  }
+  assert.equal(diagnoseAwsCredential("ABSKexampleBedrockApiKey0001|us-west-2"), null);
+  assert.equal(diagnoseAwsCredential("AKIAEXAMPLE000000001|exampleSecretAccessKey000000001|eu-west-1"), null);
 });
