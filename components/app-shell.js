@@ -8,7 +8,7 @@ import ThemeToggle from "./theme-toggle.js";
 export function BrandMark({ size = 24 }) {
   return (
     <span className="brand-mark" style={{ width: size, height: size }} aria-hidden="true">
-      <KeyRound size={Math.round(size * 0.56)} strokeWidth={2.4} />
+      <KeyRound size={Math.round(size * 0.58)} strokeWidth={2.25} />
     </span>
   );
 }

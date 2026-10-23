@@ -28,7 +28,6 @@
   --primary-foreground: #ffffff;
   --primary-soft: #e9f3fc;
   --primary-strong: #0276ea;
-  --brand-gradient: linear-gradient(135deg, #3ea4ec 0%, #6d6cff 58%, #b45cf0 100%);
   --success: #009767;
   --success-soft: rgba(0, 151, 103, 0.1);
   --warning: #cd8900;
@@ -207,9 +206,9 @@ p {
   display: inline-grid;
   flex: none;
   place-items: center;
-  border-radius: 30%;
-  color: #ffffff;
-  background: var(--brand-gradient);
+  border-radius: 50%;
+  color: var(--primary-foreground);
+  background: var(--primary);
 }
 
 .header-actions {
@@ -1557,7 +1556,7 @@ p {
 .progress-fill {
   height: 100%;
   border-radius: var(--radius-pill);
-  background: var(--brand-gradient);
+  background: var(--primary);
   transition: width 0.3s ease;
 }
 
