@@ -1396,3 +1396,27 @@
 - `lib/format.js`：抽出金额、时间和渠道状态格式化函数，供多个页面共用。
 - `README.md`、`docs/nextjs-usage.md`：更新界面说明。
 - 回滚方式：恢复上述文件到本轮开始前版本并移除 `lucide-react` 依赖；本轮未修改接口、SQLite schema 或正式数据。
+
+## 2026-10-23 - Task: 兼容 New API v1.0.0-rc.45 的访问令牌登录
+
+### What was done
+
+- New API v1.0.0-rc.45 登录改为返回约 15 分钟有效的 Bearer 访问令牌、会话 ID 和 `new_api_refresh` 刷新 Cookie，不再返回 `data.id` 和会话 Cookie，导致测试连接、读取分组、导入和同步全部报“登录响应中缺少管理员用户 ID”。
+- `NewApiClient` 按登录响应自动选择认证方式：旧版继续使用会话 Cookie 和 `New-Api-User`；新版使用 `Authorization: Bearer` 和 `New-Api-User`，用户 ID 取自 `data.user.id`，缺失时取 JWT 的 `sub`。
+- 访问令牌在过期前 60 秒通过 `POST /api/user/auth/refresh` 续期，携带刷新 Cookie 和 `X-Auth-Session`，并保存每次轮换后的刷新 Cookie；并发请求共用同一次刷新。
+- 已认证请求收到 401 时先刷新令牌再重试一次；刷新失败时用已保存的管理员凭据重新登录，避免每 15 分钟新增一个上游登录会话。
+
+### Testing
+
+- `node --test test/new-api-client.test.js`：通过；4 项测试覆盖 Bearer 请求头、并发请求只刷新一次、刷新 Cookie 轮换、401 后刷新重试和刷新失败回退登录。
+- `npm test`：通过；39 项测试全部通过。
+- `npm run build`：通过。
+- 本地运行 `calciumion/new-api:v1.0.0-rc.45`：直接调用客户端强制令牌过期和损坏令牌，均能刷新后成功；完整应用流程中测试连接、读取分组、导入 Claude、OpenAI 与 Grok 渠道和同步全部成功，上游渠道类型、分组、优先级和权重正确。
+
+### Notes
+
+- `lib/new-api-client.js`：增加访问令牌认证、刷新和 401 重试。
+- `lib/logger.js`：增加访问令牌被拒绝和刷新失败的日志标签。
+- `test/new-api-client.test.js`：新增访问令牌认证测试。
+- `docs/nextjs-usage.md`：补充两种认证方式和排查说明。
+- 回滚方式：恢复上述文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
