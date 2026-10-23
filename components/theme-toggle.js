@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 
-import { THEME_STORAGE_KEY } from "../lib/theme.js";
+import { THEME_STORAGE_KEY } from "../lib/preferences.js";
 
 const THEME_OPTIONS = Object.freeze({
   system: { label: "跟随系统", icon: Monitor, next: "light" },

@@ -1,7 +1,7 @@
 import "./globals.css";
 
 import ToastViewport from "../components/toast-viewport.js";
-import { THEME_INITIALIZATION_SCRIPT } from "../lib/theme.js";
+import { PREFERENCES_INITIALIZATION_SCRIPT } from "../lib/preferences.js";
 
 export const metadata = {
   title: "New API 渠道管理",
@@ -12,7 +12,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INITIALIZATION_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: PREFERENCES_INITIALIZATION_SCRIPT }} />
       </head>
       <body>
         {children}

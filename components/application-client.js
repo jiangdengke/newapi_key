@@ -76,6 +76,7 @@ function createNavigation(principal, instances) {
       items: instances.map((instance) => ({
         key: `instance:${instance.id}`,
         label: instance.name,
+        initial: instance.name.slice(0, 1).toUpperCase(),
         dotTone: instance.enabled ? "is-enabled" : "is-disabled",
       })),
     }] : []),

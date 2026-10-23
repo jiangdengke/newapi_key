@@ -3,7 +3,27 @@
 import { useEffect, useState } from "react";
 import { KeyRound, LogOut, PanelLeft } from "lucide-react";
 
+import { SIDEBAR_STORAGE_KEY } from "../lib/preferences.js";
 import ThemeToggle from "./theme-toggle.js";
+
+const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
+
+function persistSidebarCollapsed(isCollapsed) {
+  if (isCollapsed) {
+    document.documentElement.dataset.sidebar = "collapsed";
+  } else {
+    delete document.documentElement.dataset.sidebar;
+  }
+  try {
+    if (isCollapsed) {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, "collapsed");
+    } else {
+      window.localStorage.removeItem(SIDEBAR_STORAGE_KEY);
+    }
+  } catch {
+    return;
+  }
+}
 
 export function BrandMark({ size = 24 }) {
   return (
@@ -33,10 +53,41 @@ export default function AppShell({
   children,
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
 
   useEffect(() => {
     setIsSidebarOpen(false);
   }, [activeKey]);
+
+  useEffect(() => {
+    setIsSidebarCollapsed(document.documentElement.dataset.sidebar === "collapsed");
+    const mobileLayoutQuery = window.matchMedia(MOBILE_LAYOUT_QUERY);
+    function updateLayout() {
+      setIsMobileLayout(mobileLayoutQuery.matches);
+      if (!mobileLayoutQuery.matches) {
+        setIsSidebarOpen(false);
+      }
+    }
+    updateLayout();
+    mobileLayoutQuery.addEventListener("change", updateLayout);
+    return () => mobileLayoutQuery.removeEventListener("change", updateLayout);
+  }, []);
+
+  function toggleSidebar() {
+    if (isMobileLayout) {
+      setIsSidebarOpen((currentValue) => !currentValue);
+      return;
+    }
+    const nextCollapsed = !isSidebarCollapsed;
+    persistSidebarCollapsed(nextCollapsed);
+    setIsSidebarCollapsed(nextCollapsed);
+  }
+
+  const isSidebarVisible = isMobileLayout ? isSidebarOpen : !isSidebarCollapsed;
+  const sidebarToggleLabel = isMobileLayout
+    ? (isSidebarOpen ? "收起导航" : "展开导航")
+    : (isSidebarCollapsed ? "展开侧边栏" : "收起侧边栏");
 
   return (
     <div className="app">
@@ -44,9 +95,10 @@ export default function AppShell({
         <button
           className="btn btn-ghost btn-icon sidebar-toggle"
           type="button"
-          aria-label={isSidebarOpen ? "收起导航" : "展开导航"}
-          aria-expanded={isSidebarOpen}
-          onClick={() => setIsSidebarOpen((currentValue) => !currentValue)}
+          aria-label={sidebarToggleLabel}
+          aria-expanded={isSidebarVisible}
+          title={sidebarToggleLabel}
+          onClick={toggleSidebar}
         >
           <PanelLeft size={16} />
         </button>
@@ -87,7 +139,12 @@ export default function AppShell({
                     {ItemIcon ? (
                       <ItemIcon size={16} aria-hidden="true" />
                     ) : (
-                      <span className={`nav-dot ${item.dotTone || ""}`} aria-hidden="true" />
+                      <>
+                        <span className={`nav-dot ${item.dotTone || ""}`} aria-hidden="true" />
+                        <span className={`nav-initial ${item.dotTone || ""}`} aria-hidden="true">
+                          {item.initial}
+                        </span>
+                      </>
                     )}
                     <span className="nav-item-label">{item.label}</span>
                     {item.meta !== undefined ? <span className="nav-item-meta">{item.meta}</span> : null}
