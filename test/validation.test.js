@@ -246,35 +246,16 @@ test("parseAwsCredential detects AK/SK and API key formats", () => {
       keyType: "ak_sk",
       region: "us-east-1",
       secrets: ["AKIAEXAMPLE000000001", "exampleSecretAccessKey000000001"],
-      credential: "AKIAEXAMPLE000000001|exampleSecretAccessKey000000001|us-east-1",
     },
   );
   assert.deepEqual(parseAwsCredential("ABSKexampleBedrockApiKey0001|ap-northeast-1"), {
     keyType: "api_key",
     region: "ap-northeast-1",
     secrets: ["ABSKexampleBedrockApiKey0001"],
-    credential: "ABSKexampleBedrockApiKey0001|ap-northeast-1",
   });
   assert.equal(parseAwsCredential("AKIAEXAMPLE000000001|exampleSecretAccessKey000000001|useast1"), null);
   assert.equal(parseAwsCredential("AKIAEXAMPLE000000001|short|us-east-1"), null);
   assert.equal(parseAwsCredential("sk-ant-api03-not-aws"), null);
-});
-
-test("parseAwsCredential fills in the default region when a line has none", () => {
-  assert.equal(
-    parseAwsCredential("LLM_000000000000000_ExampleBedrockKey", "us-west-2").credential,
-    "LLM_000000000000000_ExampleBedrockKey|us-west-2",
-  );
-  assert.equal(
-    parseAwsCredential("AKIAEXAMPLE000000001|exampleSecretAccessKey000000001", "eu-central-1").keyType,
-    "ak_sk",
-  );
-  assert.equal(
-    parseAwsCredential("ABSKexampleBedrockApiKey0001|ap-northeast-1", "us-east-1").region,
-    "ap-northeast-1",
-  );
-  assert.equal(parseAwsCredential("LLM_000000000000000_ExampleBedrockKey"), null);
-  assert.equal(parseAwsCredential("LLM_000000000000000_ExampleBedrockKey", "not-a-region"), null);
 });
 
 test("validateImportInput validates AWS credentials and interface type", () => {
@@ -297,17 +278,4 @@ test("validateImportInput validates AWS credentials and interface type", () => {
     () => validateImportInput({ ...baseInput, keys: [baseInput.keys[0], "not-an-aws-key"] }),
     /第 2 个 AWS 凭证格式无效/,
   );
-  assert.deepEqual(
-    validateImportInput({ ...baseInput, keys: ["ABSKexampleBedrockApiKey0001"], awsRegion: "us-west-2" }).keys,
-    ["ABSKexampleBedrockApiKey0001|us-west-2"],
-  );
-  assert.throws(
-    () => validateImportInput({
-      ...baseInput,
-      keys: ["ABSKexampleBedrockApiKey0001", "ABSKexampleBedrockApiKey0001|us-west-2"],
-      awsRegion: "us-west-2",
-    }),
-    /第 2 个 AWS 凭证补全区域后与第 1 个重复/,
-  );
-  assert.throws(() => validateImportInput({ ...baseInput, awsRegion: "mars-1" }), /AWS 默认区域格式无效/);
 });
