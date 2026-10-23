@@ -214,6 +214,94 @@ export function PasswordInput({ className = "", ...inputProps }) {
   );
 }
 
+export function TagInput({
+  id,
+  values,
+  onChange,
+  placeholder,
+  disabled = false,
+  separatorPattern = /[\s,，]+/,
+  "aria-label": ariaLabel,
+}) {
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
+
+  function addValues(rawText) {
+    const nextValues = [...values];
+    for (const rawValue of String(rawText).split(separatorPattern)) {
+      const value = rawValue.trim();
+      if (value && !nextValues.includes(value)) {
+        nextValues.push(value);
+      }
+    }
+    if (nextValues.length !== values.length) {
+      onChange(nextValues);
+    }
+  }
+
+  function commitDraft() {
+    if (draft.trim()) {
+      addValues(draft);
+    }
+    setDraft("");
+  }
+
+  return (
+    <div
+      className={`tag-input ${disabled ? "is-disabled" : ""}`}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          event.preventDefault();
+          inputRef.current?.focus();
+        }
+      }}
+    >
+      {values.map((value) => (
+        <span className="tag-chip" key={value}>
+          <span>{value}</span>
+          {disabled ? null : (
+            <button
+              type="button"
+              aria-label={`移除 ${value}`}
+              onClick={() => onChange(values.filter((currentValue) => currentValue !== value))}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </span>
+      ))}
+      <input
+        ref={inputRef}
+        id={id}
+        aria-label={ariaLabel}
+        value={draft}
+        disabled={disabled}
+        spellCheck="false"
+        autoComplete="off"
+        placeholder={values.length === 0 ? placeholder : "添加..."}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          if (separatorPattern.test(nextDraft)) {
+            addValues(nextDraft);
+            setDraft("");
+            return;
+          }
+          setDraft(nextDraft);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft();
+          } else if (event.key === "Backspace" && !draft && values.length > 0) {
+            onChange(values.slice(0, -1));
+          }
+        }}
+        onBlur={commitDraft}
+      />
+    </div>
+  );
+}
+
 export function Switch({ checked, onChange, disabled = false, label, description }) {
   const control = (
     <button

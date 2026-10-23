@@ -63,6 +63,8 @@ mkdir -p backups
 cp data/channel-records.sqlite "backups/channel-records-$(date +%Y%m%d-%H%M%S).sqlite"
 ```
 
+schema 8 为实例增加 `channel_models` 列，保存各渠道类型的默认模型；升级时该列为空，实例继续使用内置默认模型，行为不变。
+
 schema 7 移除 Admin Hub 连接协议，删除实例表中的 `connection_protocol` 和 `admin_hub_target_site_id` 两列。升级时，原有 Admin Hub 实例会被自动停用，并撤销其访客 Session，避免按 New API 协议访问 Admin Hub 地址；这些实例的本地渠道历史保留，管理员可以改为 New API 地址后重新启用，或直接删除。需要回滚时，停止新版本服务并恢复升级前的 SQLite 备份；旧版本不能直接使用已经升级的数据库。
 
 ## 管理和使用
@@ -96,7 +98,7 @@ New API 管理员密码只在新建实例时填写，编辑实例不提供修改
 | 项目 | 渠道导入行为 |
 | --- | --- |
 | 渠道类型 | Claude 使用 New API 类型编号 `14`；OpenAI 使用类型编号 `1`；Grok 使用 xAI 类型编号 `48` |
-| 模型 | Claude 固定为 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`；OpenAI 固定为 `gpt-5.6-sol`；Grok 固定为下方列出的 10 个模型 |
+| 模型 | 取实例为该渠道类型配置的默认模型，访问者导入时可临时增删，只影响这一批渠道；未配置时 Claude 为 `claude-opus-4-8`、`claude-opus-4-7`、`claude-opus-4-6`，OpenAI 为 `gpt-5.6-sol`，Grok 为下方列出的 10 个模型 |
 | Key 来源 | Claude 接收 Anthropic Key；OpenAI 仅接收官方 OpenAI Key；Grok 仅接收官方 xAI Key；均不提供自定义兼容接口 Base URL |
 | 分组 | 从当前实例已有分组中单选；Claude、OpenAI、Grok 分别优先默认选择 `anthropic`、`openai`、`xai` |
 | 名称 | 三类渠道都使用实例配置的名称前缀和日期模式，并共享序号避让；例如 `channel-0714-001` 或 `channel-001` |
@@ -105,7 +107,9 @@ New API 管理员密码只在新建实例时填写，编辑实例不提供修改
 | 导入 Key 存储 | 新导入的完整 Key 以 AES-256-GCM 加密保存，同时保存掩码和 SHA-256 指纹；历史未加密记录无法恢复 |
 | 实例访问 Key 存储 | 仅保存掩码和 SHA-256 摘要，完整值只显示一次 |
 
-Grok 固定模型列表：
+管理员在实例编辑抽屉的“渠道模型”中为 Claude、OpenAI、Grok 分别维护默认模型：输入模型名后回车，或一次粘贴以空格、逗号、换行分隔的多个模型；点击标签上的 × 删除，“恢复默认”恢复内置列表。每类至少一个模型、最多 100 个，模型名不能包含空格或逗号。访问者在导入页看到预填的模型，可以临时增删，修改只用于当前这批导入，不会改变实例的默认模型。
+
+Grok 内置默认模型列表：
 
 ```text
 grok-4.20-0309-non-reasoning

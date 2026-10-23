@@ -1420,3 +1420,30 @@
 - `test/new-api-client.test.js`：新增访问令牌认证测试。
 - `docs/nextjs-usage.md`：补充两种认证方式和排查说明。
 - 回滚方式：恢复上述文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-10-23 - Task: 渠道模型改为按实例配置
+
+### What was done
+
+- 原先 Claude、OpenAI、Grok 的模型写死在 `lib/validation.js`，新增模型必须改代码重新部署。
+- 实例新增“渠道模型”配置：管理员在编辑抽屉中为三类渠道分别维护默认模型，使用标签输入，支持回车添加、粘贴多个、删除和恢复默认。
+- 访问者导入页预填实例的默认模型，可临时增删；修改按渠道类型分别保留，只用于当前这批导入，不改变实例默认值。
+- 导入接口接收可选的 `models`，未提供时使用实例配置；模型逐个去空格、去重，拒绝空格、逗号和控制字符，每类 1 到 100 个。
+- schema 升级到 8，新增 `channel_models` 列；为空时使用内置默认模型，现有实例行为不变。
+
+### Testing
+
+- `npm test`：通过；44 项测试全部通过，新增模型列表校验、实例模型持久化与默认回退、导入使用实例模型和临时覆盖的测试。
+- `npm run build`：通过。
+- 本地 `calciumion/new-api:v1.0.0-rc.45` 加 Playwright 端到端 10 项全部通过：抽屉中删除、回车添加、粘贴多个、空列表报错、恢复默认、保存后回显，访问者调整模型并按类型保留，导入成功后上游渠道模型为调整后的列表，实例默认模型未被改动；页面无运行时错误。
+
+### Notes
+
+- `lib/validation.js`：新增默认模型表、模型列表校验，导入输入携带模型。
+- `lib/admin-validation.js`、`lib/application-store.js`：实例保存和读取渠道模型，schema 8 迁移。
+- `lib/instance-service.js`、`app/api/instances/[instanceId]/import/route.js`、`app/api/instances/[instanceId]/config/route.js`：导入和配置接口使用实例模型。
+- `components/ui.js`、`app/globals.css`：新增标签输入组件。
+- `components/admin-instances.js`、`components/instance-workspace.js`：新增模型配置和导入时的模型调整。
+- `test/validation.test.js`、`test/application-store.test.js`、`test/instance-route.test.js`：新增测试。
+- `README.md`、`docs/nextjs-usage.md`：更新模型说明。
+- 回滚方式：恢复上述文件到本轮开始前版本，并恢复升级前的 SQLite 备份；旧版本会忽略 `channel_models` 列。

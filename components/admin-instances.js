@@ -22,6 +22,7 @@ import {
 
 import { requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
+import { CHANNEL_KIND_LABELS, DEFAULT_CHANNEL_MODELS } from "../lib/validation.js";
 import {
   ConfirmDialog,
   DropdownMenu,
@@ -36,6 +37,7 @@ import {
   StatCard,
   StatusText,
   Switch,
+  TagInput,
 } from "./ui.js";
 
 const EMPTY_INSTANCE_FORM = Object.freeze({
@@ -49,8 +51,14 @@ const EMPTY_INSTANCE_FORM = Object.freeze({
   priority: "0",
   weight: "0",
   dateMode: "auto",
+  channelModels: DEFAULT_CHANNEL_MODELS,
   enabled: true,
 });
+
+function hasSameModels(firstModels, secondModels) {
+  return firstModels.length === secondModels.length
+    && firstModels.every((model, modelIndex) => model === secondModels[modelIndex]);
+}
 
 function createInstanceFormFromInstance(instance) {
   return {
@@ -64,6 +72,7 @@ function createInstanceFormFromInstance(instance) {
     priority: String(instance.priority),
     weight: String(instance.weight),
     dateMode: instance.dateMode,
+    channelModels: instance.channelModels,
     enabled: instance.enabled,
   };
 }
@@ -144,6 +153,51 @@ function InstanceFormFields({ instanceForm, onChange, isEditing }) {
           label="接续现有同前缀序号"
           description="从上游已有同前缀渠道的最大序号之后继续编号。"
         />
+      </section>
+
+      <section className="form-section">
+        <SectionHeading
+          icon={Boxes}
+          title="渠道模型"
+          description="导入渠道时默认使用的模型，访问者导入时可临时增删。"
+          tone="info"
+        />
+        {Object.entries(CHANNEL_KIND_LABELS).map(([channelKind, channelLabel]) => {
+          const channelModels = instanceForm.channelModels[channelKind];
+          const defaultModels = DEFAULT_CHANNEL_MODELS[channelKind];
+          return (
+            <Field
+              key={channelKind}
+              label={`${channelLabel} 模型`}
+              extra={(
+                <span className="field-actions">
+                  <span className="field-counter">{channelModels.length} 个</span>
+                  {hasSameModels(channelModels, defaultModels) ? null : (
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      type="button"
+                      onClick={() => onChange("channelModels", {
+                        ...instanceForm.channelModels,
+                        [channelKind]: [...defaultModels],
+                      })}
+                    >
+                      恢复默认
+                    </button>
+                  )}
+                </span>
+              )}
+            >
+              <TagInput
+                values={channelModels}
+                placeholder="输入模型名后回车，可一次粘贴多个"
+                onChange={(nextModels) => onChange("channelModels", {
+                  ...instanceForm.channelModels,
+                  [channelKind]: nextModels,
+                })}
+              />
+            </Field>
+          );
+        })}
       </section>
 
       {isEditing ? (

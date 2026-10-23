@@ -292,7 +292,7 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
     assert.equal(store.getInstance(placeholderInstance.id).id, placeholderInstance.id);
     assert.equal(store.deleteInstance(configuredInstance.id), null);
 
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 7);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 8);
     assert.deepEqual(store.database.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(store.database.prepare(`
       SELECT COUNT(*) AS total FROM users WHERE role = 'user'
@@ -381,9 +381,67 @@ test("ApplicationStore disables legacy Admin Hub instances and drops protocol co
     assert.equal(columnNames.includes("connection_protocol"), false);
     assert.equal(columnNames.includes("admin_hub_target_site_id"), false);
     assert.equal("connectionProtocol" in store.getInstance(standardInstance.id), false);
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 7);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 8);
   } finally {
     store.close();
     rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("ApplicationStore keeps per-instance channel models and falls back to defaults", () => {
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: ENCRYPTION_KEY,
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const instanceInput = {
+    name: "Model instance",
+    baseUrl: "https://models.example.com",
+    username: "new-api-administrator",
+    password: "new-api-password",
+    group: "anthropic",
+    namePrefix: "claude",
+    startNumber: 1,
+    continueFromExisting: true,
+    priority: 0,
+    weight: 0,
+    dateMode: "auto",
+    enabled: true,
+  };
+  const customModels = {
+    claude: ["claude-opus-4-9"],
+    openai: ["gpt-5.7"],
+    grok: ["grok-5"],
+  };
+
+  try {
+    const instance = store.createInstance(instanceInput);
+    assert.deepEqual(instance.channelModels, {
+      claude: ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
+      openai: ["gpt-5.6-sol"],
+      grok: instance.channelModels.grok,
+    });
+    assert.equal(instance.channelModels.grok.length, 10);
+
+    store.updateInstance(instance.id, { ...instanceInput, password: "", channelModels: customModels });
+    assert.deepEqual(store.getInstance(instance.id).channelModels, customModels);
+    assert.deepEqual(store.getInstanceConnection(instance.id).channelModels, customModels);
+
+    store.updateInstance(instance.id, { ...instanceInput, password: "", weight: 3 });
+    assert.deepEqual(store.getInstance(instance.id).channelModels, customModels);
+
+    store.database.prepare("UPDATE new_api_instances SET channel_models = ? WHERE id = ?")
+      .run("not-json", instance.id);
+    assert.deepEqual(store.getInstance(instance.id).channelModels.claude, [
+      "claude-opus-4-8",
+      "claude-opus-4-7",
+      "claude-opus-4-6",
+    ]);
+  } finally {
+    store.close();
   }
 });

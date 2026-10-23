@@ -5,12 +5,7 @@ import {
   jsonResponse,
 } from "../../../../../lib/http.js";
 import { getRuntimeContext } from "../../../../../lib/runtime-context.js";
-import {
-  CLAUDE_MODELS,
-  GROK_MODELS,
-  OPENAI_MODELS,
-  validateChannelDefaults,
-} from "../../../../../lib/validation.js";
+import { validateChannelDefaults } from "../../../../../lib/validation.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,12 +30,8 @@ export async function GET(request, { params }) {
       success: true,
       data: {
         instance: accessibleInstance,
-        models: CLAUDE_MODELS,
-        modelsByChannelKind: {
-          claude: CLAUDE_MODELS,
-          openai: OPENAI_MODELS,
-          grok: GROK_MODELS,
-        },
+        models: instance.channelModels.claude,
+        modelsByChannelKind: instance.channelModels,
         channelDefaults,
       },
     }, { requestId });

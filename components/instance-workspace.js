@@ -31,6 +31,7 @@ import {
   StatCard,
   StatusText,
   Switch,
+  TagInput,
 } from "./ui.js";
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -53,21 +54,21 @@ const CHANNEL_KIND_DETAILS = Object.freeze({
     label: "Claude",
     keyLabel: "Anthropic Key",
     keyPlaceholder: "每行粘贴一个 Anthropic Key",
-    description: "使用 Anthropic Key，固定创建现有三个 Claude Opus 模型",
+    description: "使用 Anthropic Key 创建 Claude 渠道",
     defaultGroup: "anthropic",
   }),
   [OPENAI_CHANNEL_KIND]: Object.freeze({
     label: "OpenAI",
     keyLabel: "OpenAI Key",
     keyPlaceholder: "每行粘贴一个官方 OpenAI Key",
-    description: "使用官方 OpenAI Key，固定模型为 gpt-5.6-sol",
+    description: "使用官方 OpenAI Key 创建 OpenAI 渠道",
     defaultGroup: "openai",
   }),
   [GROK_CHANNEL_KIND]: Object.freeze({
     label: "Grok",
     keyLabel: "xAI Key",
     keyPlaceholder: "每行粘贴一个官方 xAI Key",
-    description: "使用官方 xAI Key，固定创建 10 个 Grok 模型",
+    description: "使用官方 xAI Key 创建 Grok 渠道",
     defaultGroup: "xai",
   }),
 });
@@ -96,6 +97,11 @@ function chooseAvailableGroup(availableGroups, currentGroup, defaultGroup) {
     return defaultGroup;
   }
   return availableGroups[0] ?? "";
+}
+
+function hasSameModels(firstModels, secondModels) {
+  return firstModels.length === secondModels.length
+    && firstModels.every((model, modelIndex) => model === secondModels[modelIndex]);
 }
 
 function createInitialProgress() {
@@ -149,6 +155,7 @@ export default function InstanceWorkspace({
   const [selectedChannelKind, setSelectedChannelKind] = useState(CLAUDE_CHANNEL_KIND);
   const [availableGroups, setAvailableGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState(createDefaultSelectedGroups);
+  const [selectedModels, setSelectedModels] = useState({});
   const [isLoadingGroups, setIsLoadingGroups] = useState(false);
   const [groupError, setGroupError] = useState("");
   const [progress, setProgress] = useState(createInitialProgress);
@@ -280,6 +287,7 @@ export default function InstanceWorkspace({
         return;
       }
       setConfiguration(configurationPayload.data);
+      setSelectedModels(configurationPayload.data.modelsByChannelKind);
       setHistoryData(historyPayload.data);
       setHistoryMessage(
         `共 ${historyPayload.data.total} 条本地记录，余额 `
@@ -402,6 +410,13 @@ export default function InstanceWorkspace({
       showToast(errorMessage, { type: "error" });
       return;
     }
+    const channelModels = selectedModels[channelKind] ?? [];
+    if (channelModels.length === 0) {
+      const errorMessage = `请至少保留一个 ${channelKindLabel} 模型`;
+      setPageError(errorMessage);
+      showToast(errorMessage, { type: "error" });
+      return;
+    }
     if (uniqueKeys.length === 0) {
       const errorMessage = `请至少填写一个 ${channelKindLabel} Key`;
       setPageError(errorMessage);
@@ -424,6 +439,7 @@ export default function InstanceWorkspace({
           keys: uniqueKeys,
           channelKind,
           group: selectedGroup,
+          models: channelModels,
         }),
       });
       if (!response.ok || !response.body) {
@@ -627,8 +643,11 @@ export default function InstanceWorkspace({
     : "";
   const isGroupSelectionUnavailable = isLoadingGroups || !selectedAvailableGroup;
   const selectedChannelDescription = (
-    `${selectedChannelDetails.description}，分组从当前 New API 已有分组中选择。`
+    `${selectedChannelDetails.description}。分组从当前 New API 已有分组中选择，`
+    + "模型默认使用实例配置，可在下方临时增删。"
   );
+  const selectedChannelModels = selectedModels[selectedChannelKind] ?? [];
+  const configuredChannelModels = configuration.modelsByChannelKind[selectedChannelKind] ?? [];
   const progressPercentage = progress.total > 0
     ? Math.round((progress.completed / progress.total) * 100)
     : 0;
@@ -710,6 +729,38 @@ export default function InstanceWorkspace({
                   <option key={group} value={group}>{group}</option>
                 ))}
               </Select>
+            </Field>
+            <Field
+              label="模型"
+              hint="只影响这一批导入的渠道，不会修改实例的默认模型。"
+              extra={(
+                <span className="field-actions">
+                  <span className="field-counter">{selectedChannelModels.length} 个</span>
+                  {hasSameModels(selectedChannelModels, configuredChannelModels) ? null : (
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      type="button"
+                      disabled={isImporting}
+                      onClick={() => setSelectedModels((currentSelectedModels) => ({
+                        ...currentSelectedModels,
+                        [selectedChannelKind]: [...configuredChannelModels],
+                      }))}
+                    >
+                      恢复默认
+                    </button>
+                  )}
+                </span>
+              )}
+            >
+              <TagInput
+                values={selectedChannelModels}
+                disabled={!instance.enabled || isImporting}
+                placeholder="输入模型名后回车，可一次粘贴多个"
+                onChange={(nextModels) => setSelectedModels((currentSelectedModels) => ({
+                  ...currentSelectedModels,
+                  [selectedChannelKind]: nextModels,
+                }))}
+              />
             </Field>
             <Field
               label={selectedChannelDetails.keyLabel}

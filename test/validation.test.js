@@ -6,8 +6,11 @@ import {
   normalizeKeys,
   redactSensitiveText,
   validateChannelDefaults,
+  validateChannelModels,
   validateImportInput,
+  validateModelList,
   ValidationError,
+  DEFAULT_CHANNEL_MODELS,
 } from "../lib/validation.js";
 
 test("normalizeKeys removes blank and duplicate entries", () => {
@@ -191,4 +194,45 @@ test("redactSensitiveText removes explicit secrets and key-shaped values", () =>
   assert.equal(redactedText.includes("sk-ant-example12345678"), false);
   assert.match(redactedText, /\[已隐藏\]/);
   assert.match(redactedText, /sk-\*\*\*/);
+});
+
+test("validateModelList trims, removes duplicates and rejects invalid names", () => {
+  assert.deepEqual(
+    validateModelList([" claude-opus-4-9 ", "", "claude-opus-4-9", "claude-opus-4-8"], "Claude"),
+    ["claude-opus-4-9", "claude-opus-4-8"],
+  );
+  assert.throws(() => validateModelList([], "Claude"), /请至少为 Claude 渠道填写一个模型/);
+  assert.throws(() => validateModelList(["a,b"], "Claude"), /不能包含空格或逗号/);
+  assert.throws(() => validateModelList(["model name"], "Claude"), /不能包含空格或逗号/);
+  assert.throws(() => validateModelList("claude-opus-4-9", "Claude"), /模型列表格式无效/);
+  assert.throws(
+    () => validateModelList(Array.from({ length: 101 }, (_, index) => `model-${index}`), "Grok"),
+    /最多配置 100 个模型/,
+  );
+});
+
+test("validateChannelModels fills missing channel kinds with defaults", () => {
+  assert.deepEqual(validateChannelModels({ claude: ["claude-opus-4-9"] }), {
+    claude: ["claude-opus-4-9"],
+    openai: [...DEFAULT_CHANNEL_MODELS.openai],
+    grok: [...DEFAULT_CHANNEL_MODELS.grok],
+  });
+  assert.throws(() => validateChannelModels(["claude-opus-4-9"]), /渠道模型配置格式无效/);
+});
+
+test("validateImportInput uses requested models or the channel kind defaults", () => {
+  const baseInput = {
+    keys: ["sk-ant-example"],
+    group: "anthropic",
+    namePrefix: "claude",
+    startNumber: 1,
+    priority: 0,
+    weight: 0,
+  };
+  assert.deepEqual(validateImportInput(baseInput).models, [...DEFAULT_CHANNEL_MODELS.claude]);
+  assert.deepEqual(
+    validateImportInput({ ...baseInput, models: ["claude-opus-4-9", "claude-opus-4-9"] }).models,
+    ["claude-opus-4-9"],
+  );
+  assert.throws(() => validateImportInput({ ...baseInput, models: [] }), /请至少为 Claude 渠道填写一个模型/);
 });

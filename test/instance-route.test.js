@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 
+import { GET as getInstanceConfiguration } from "../app/api/instances/[instanceId]/config/route.js";
 import { GET as getInstanceGroups } from "../app/api/instances/[instanceId]/groups/route.js";
 import { POST as importChannels } from "../app/api/instances/[instanceId]/import/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
@@ -190,6 +191,7 @@ function createImportRequest(
   keys = IMPORT_KEYS,
   channelKind = undefined,
   group = undefined,
+  models = undefined,
 ) {
   return new Request(`http://localhost/api/instances/${instanceId}/import`, {
     method: "POST",
@@ -202,6 +204,7 @@ function createImportRequest(
       keys,
       ...(channelKind ? { channelKind } : {}),
       ...(group ? { group } : {}),
+      ...(models ? { models } : {}),
     }),
   });
 }
@@ -535,6 +538,90 @@ test("standard New API import creates an official xAI Grok channel", async () =>
     });
     assert.equal(invalidGroupResponseText.includes(invalidGroupKey), false);
     assert.equal(createdChannelRequests.length, 1);
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+    await closeServer(mockNewApiServer);
+  }
+});
+
+test("import uses instance channel models and per-import model overrides", async () => {
+  const createdChannelRequests = [];
+  const storedChannels = [];
+  const mockNewApiServer = createMockNewApiServer(createdChannelRequests, storedChannels);
+  const mockNewApiBaseUrl = await listenOnAvailablePort(mockNewApiServer);
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 23),
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+
+  try {
+    const instance = store.createInstance({
+      name: "Custom model instance",
+      baseUrl: mockNewApiBaseUrl,
+      username: "new-api-administrator",
+      password: NEW_API_PASSWORD,
+      group: "anthropic",
+      namePrefix: "channel",
+      startNumber: 1,
+      continueFromExisting: true,
+      priority: 0,
+      weight: 0,
+      dateMode: "",
+      channelModels: {
+        claude: ["claude-opus-4-9", "claude-sonnet-4-9"],
+        openai: ["gpt-5.7"],
+        grok: ["grok-5"],
+      },
+      enabled: true,
+    });
+    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+
+    const configurationResponse = await getInstanceConfiguration(
+      createInstanceGetRequest(instance.id, session.token, "config"),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    const configurationPayload = await configurationResponse.json();
+    assert.deepEqual(configurationPayload.data.modelsByChannelKind.claude, [
+      "claude-opus-4-9",
+      "claude-sonnet-4-9",
+    ]);
+
+    const defaultModelResponse = await importChannels(
+      createImportRequest(instance.id, session.token, ["sk-ant-default-models"], "claude", "anthropic"),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal((await defaultModelResponse.text()).includes("\"failure\":0"), true);
+    assert.equal(createdChannelRequests[0].channel.models, "claude-opus-4-9,claude-sonnet-4-9");
+
+    const overrideResponse = await importChannels(
+      createImportRequest(
+        instance.id,
+        session.token,
+        ["sk-ant-override-models"],
+        "claude",
+        "anthropic",
+        [" claude-haiku-4-9 ", "claude-haiku-4-9"],
+      ),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal((await overrideResponse.text()).includes("\"failure\":0"), true);
+    assert.equal(createdChannelRequests[1].channel.models, "claude-haiku-4-9");
+
+    const invalidResponse = await importChannels(
+      createImportRequest(instance.id, session.token, ["sk-ant-invalid-models"], "claude", "anthropic", ["bad,model"]),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal(invalidResponse.status, 400);
+    assert.match((await invalidResponse.json()).message, /不能包含空格或逗号/);
+    assert.equal(createdChannelRequests.length, 2);
   } finally {
     restoreRuntimeContext();
     store.close();
