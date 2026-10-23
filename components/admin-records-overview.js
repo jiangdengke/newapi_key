@@ -1,9 +1,34 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  ArrowRight,
+  Copy,
+  Eye,
+  EyeOff,
+  Inbox,
+  KeyRound,
+  ListChecks,
+  RefreshCw,
+  Search,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 
 import { requestJson } from "../lib/client-api.js";
+import { formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
+import {
+  ConfirmDialog,
+  EmptyState,
+  PageHeader,
+  Pagination,
+  PasswordInput,
+  Select,
+  StatCard,
+  StatusText,
+  Switch,
+} from "./ui.js";
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -31,36 +56,6 @@ function createEmptyRecordData() {
   };
 }
 
-function formatUsd(usedUsd) {
-  const normalizedAmount = Number(usedUsd) || 0;
-  return normalizedAmount.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: normalizedAmount > 0 && normalizedAmount < 0.01 ? 6 : 4,
-  });
-}
-
-function formatDateTime(rawDateTime, emptyText) {
-  if (!rawDateTime) {
-    return emptyText;
-  }
-  const parsedDate = new Date(rawDateTime);
-  return Number.isNaN(parsedDate.getTime())
-    ? "未知时间"
-    : parsedDate.toLocaleString("zh-CN", { hour12: false });
-}
-
-function getStatusText(statusLabel) {
-  if (statusLabel === "enabled") {
-    return "已启用";
-  }
-  if (statusLabel === "missing") {
-    return "渠道不存在";
-  }
-  return "已停用";
-}
-
 function showUsageStartedNotifications(usageStartedRecords) {
   for (const usageStartedRecord of usageStartedRecords || []) {
     showToast(
@@ -72,7 +67,7 @@ function showUsageStartedNotifications(usageStartedRecords) {
   }
 }
 
-export default function AdminRecordsOverview({ instances, onOpenInstance, refreshToken }) {
+export default function AdminRecordsOverview({ instances, onOpenInstance }) {
   const [instanceFilter, setInstanceFilter] = useState("");
   const [channelNameFilter, setChannelNameFilter] = useState("");
   const [keyFilter, setKeyFilter] = useState("");
@@ -130,12 +125,8 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
   }
 
   useEffect(() => {
-    setInstanceFilter("");
-    setChannelNameFilter("");
-    setKeyFilter("");
-    setRevealedKeys({});
     loadRecords(createEmptyQuery());
-  }, [refreshToken]);
+  }, []);
 
   async function synchronizeRecords({ automatic = false } = {}) {
     if (synchronizationInProgressRef.current) {
@@ -229,6 +220,18 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
     }
   }
 
+  function toggleRecordKeyVisibility(record) {
+    if (revealedKeys[record.id]) {
+      setRevealedKeys((currentKeys) => {
+        const nextKeys = { ...currentKeys };
+        delete nextKeys[record.id];
+        return nextKeys;
+      });
+      return;
+    }
+    loadRecordKey(record);
+  }
+
   async function copyRecordKey(record) {
     const recordKey = await loadRecordKey(record);
     if (!recordKey) {
@@ -264,11 +267,11 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
     await loadRecords({ ...activeQuery, page: nextPage });
   }
 
-  async function changePageSize(event) {
+  async function changePageSize(nextPageSize) {
     await loadRecords({
       ...activeQuery,
       page: 1,
-      pageSize: Number(event.target.value),
+      pageSize: nextPageSize,
     });
   }
 
@@ -323,289 +326,236 @@ export default function AdminRecordsOverview({ instances, onOpenInstance, refres
     && currentPageRecordIds.every((recordId) => selectedRecordIds.includes(recordId));
 
   return (
-    <section className="panel admin-records-panel" aria-busy={isLoading}>
-      <div className="panel-heading">
-        <div>
-          <h2>全部 Key 记录</h2>
-          <p>{message}</p>
-        </div>
-        <div className="record-sync-actions">
-          <label className="automatic-sync-control">
-            <input
-              type="checkbox"
+    <div className="page">
+      <PageHeader
+        title="Key 记录"
+        description="跨实例查看通过本工具导入的渠道，可按实例、渠道名称或完整 Key 筛选。"
+        actions={(
+          <>
+            <Switch
               checked={isAutomaticSynchronizationEnabled}
-              onChange={(event) => setIsAutomaticSynchronizationEnabled(
-                event.target.checked,
-              )}
+              onChange={setIsAutomaticSynchronizationEnabled}
+              label="自动同步（30 秒）"
             />
-            自动同步（30 秒）
-          </label>
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={isSynchronizing || isDeleting || instances.length === 0}
-            onClick={() => synchronizeRecords()}
-          >
-            {isSynchronizing ? "正在同步..." : "同步全部实例"}
-          </button>
-        </div>
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={isSynchronizing || isDeleting || instances.length === 0}
+              onClick={() => synchronizeRecords()}
+            >
+              <RefreshCw size={15} className={isSynchronizing ? "spin" : ""} aria-hidden="true" />
+              {isSynchronizing ? "正在同步..." : "同步全部实例"}
+            </button>
+          </>
+        )}
+      />
+
+      <div className="stat-grid">
+        <StatCard icon={ListChecks} label="记录数" value={recordData.total} hint="按当前筛选条件统计" />
+        <StatCard icon={Wallet} label="余额合计" value={formatUsd(recordData.totalBalanceUsd)} hint="来自 New API 渠道余额" tone="success" />
+        <StatCard icon={KeyRound} label="累计用量" value={formatUsd(recordData.totalUsedUsd)} hint="used_quota 换算为美元" tone="info" />
       </div>
 
-      <form className="admin-record-filters" onSubmit={submitFilters}>
-        <label className="field">
-          <span>New API 实例</span>
-          <select
-            value={instanceFilter}
-            onChange={(event) => setInstanceFilter(event.target.value)}
-          >
-            <option value="">全部实例</option>
-            {instances.map((instance) => (
-              <option key={instance.id} value={instance.id}>{instance.name}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>渠道名称</span>
-          <input
-            placeholder="支持部分名称"
-            value={channelNameFilter}
-            onChange={(event) => setChannelNameFilter(event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>完整 Anthropic Key</span>
-          <input
-            type="password"
-            autoComplete="off"
-            placeholder="精确查询"
-            value={keyFilter}
-            onChange={(event) => setKeyFilter(event.target.value)}
-          />
-        </label>
-        <div className="admin-record-filter-actions">
-          <button className="button button-primary" disabled={isLoading}>查询</button>
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={isLoading}
-            onClick={clearFilters}
-          >
-            清除
-          </button>
-        </div>
+      <form className="toolbar" onSubmit={submitFilters}>
+        <Select
+          className="toolbar-select"
+          aria-label="按实例筛选"
+          value={instanceFilter}
+          onChange={(event) => setInstanceFilter(event.target.value)}
+        >
+          <option value="">全部实例</option>
+          {instances.map((instance) => (
+            <option key={instance.id} value={instance.id}>{instance.name}</option>
+          ))}
+        </Select>
+        <input
+          className="input toolbar-input"
+          aria-label="渠道名称"
+          placeholder="按渠道名称筛选..."
+          value={channelNameFilter}
+          onChange={(event) => setChannelNameFilter(event.target.value)}
+        />
+        <PasswordInput
+          className="toolbar-input toolbar-input-wide"
+          aria-label="完整 Key"
+          autoComplete="off"
+          spellCheck="false"
+          placeholder="粘贴完整 Key 精确查询..."
+          value={keyFilter}
+          onChange={(event) => setKeyFilter(event.target.value)}
+        />
+        <button className="btn btn-outline" disabled={isLoading}>
+          <Search size={15} aria-hidden="true" />
+          查询
+        </button>
+        <button className="btn btn-ghost" type="button" disabled={isLoading} onClick={clearFilters}>
+          清除
+        </button>
       </form>
 
-      <div className="admin-record-batch-actions">
-        <span>已选择 {selectedRecordIds.length} 条当前页记录</span>
-        <button
-          className="button button-danger button-compact"
-          type="button"
-          disabled={selectedRecordIds.length === 0 || isLoading || isDeleting}
-          onClick={() => openDeleteConfirmation(selectedRecordIds)}
-        >
-          批量删除
-        </button>
-      </div>
-
-      <div className="history-table-shell">
-        <table className="history-table admin-record-table">
-          <thead>
-            <tr>
-              <th className="record-selection-column">
-                <input
-                  className="record-selection-checkbox"
-                  type="checkbox"
-                  aria-label="全选当前页"
-                  checked={allCurrentPageRecordsSelected}
-                  disabled={recordData.records.length === 0 || isLoading || isDeleting}
-                  onChange={toggleCurrentPageSelection}
-                />
-              </th>
-              <th>New API 实例</th>
-              <th>渠道</th>
-              <th>Key</th>
-              <th>状态</th>
-              <th>余额</th>
-              <th>累计用量</th>
-              <th>导入时间</th>
-              <th>最后同步</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recordData.records.map((record) => (
-              <tr key={record.id}>
-                <td className="record-selection-column">
-                  <input
-                    className="record-selection-checkbox"
-                    type="checkbox"
-                    aria-label={`选择记录 ${record.channelName}`}
-                    checked={selectedRecordIds.includes(record.id)}
-                    disabled={isLoading || isDeleting}
-                    onChange={() => toggleRecordSelection(record.id)}
-                  />
-                </td>
-                <td><strong>{record.instanceName}</strong></td>
-                <td>
-                  <strong>{record.channelName}</strong>
-                  <small>渠道 ID：{record.newApiChannelId}</small>
-                </td>
-                <td className="history-key record-key-cell">
-                  <span className="record-key-value">
-                    {revealedKeys[record.id] || record.keyMask}
-                  </span>
-                  {record.keyAvailable ? (
-                    <span className="record-key-actions">
-                      <button
-                        className="button button-secondary button-compact"
-                        type="button"
-                        disabled={loadingKeyRecordId === record.id}
-                        onClick={() => {
-                          if (revealedKeys[record.id]) {
-                            setRevealedKeys((currentKeys) => {
-                              const nextKeys = { ...currentKeys };
-                              delete nextKeys[record.id];
-                              return nextKeys;
-                            });
-                            return;
-                          }
-                          loadRecordKey(record);
-                        }}
-                      >
-                        {revealedKeys[record.id] ? "隐藏" : "显示"}
-                      </button>
-                      <button
-                        className="button button-secondary button-compact"
-                        type="button"
-                        disabled={loadingKeyRecordId === record.id}
-                        onClick={() => copyRecordKey(record)}
-                      >
-                        复制
-                      </button>
-                    </span>
-                  ) : (
-                    <small className="record-key-unavailable">旧记录不可恢复</small>
-                  )}
-                </td>
-                <td>
-                  <span className={`history-status history-status-${record.statusLabel}`}>
-                    {getStatusText(record.statusLabel)}
-                  </span>
-                </td>
-                <td className="history-usage">{formatUsd(record.balanceUsd)}</td>
-                <td className="history-usage">{formatUsd(record.usedUsd)}</td>
-                <td>{formatDateTime(record.importedAt, "未知时间")}</td>
-                <td>{formatDateTime(record.lastSyncedAt, "尚未同步")}</td>
-                <td>
-                  <div className="record-row-actions">
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      onClick={() => onOpenInstance(record.instanceId)}
-                    >
-                      进入实例
-                    </button>
-                    <button
-                      className="button button-danger"
-                      type="button"
-                      disabled={isDeleting}
-                      onClick={() => openDeleteConfirmation([record.id])}
-                    >
-                      删除
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!isLoading && recordData.records.length === 0 ? (
-              <tr><td className="history-empty" colSpan="10">没有符合条件的 Key 记录。</td></tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="history-pagination">
-        <span>第 {recordData.page} / {recordData.totalPages} 页</span>
-        <div className="pagination-controls">
-          <label className="page-size-control">
-            <span>每页</span>
-            <select
-              value={recordData.pageSize}
-              disabled={isLoading}
-              onChange={changePageSize}
+      <div className="table-meta">
+        <span>{message}</span>
+        {selectedRecordIds.length > 0 ? (
+          <span className="table-meta-actions">
+            已选择 {selectedRecordIds.length} 条
+            <button
+              className="btn btn-danger-outline btn-sm"
+              type="button"
+              disabled={isLoading || isDeleting}
+              onClick={() => openDeleteConfirmation(selectedRecordIds)}
             >
-              {PAGE_SIZE_OPTIONS.map((pageSize) => (
-                <option key={pageSize} value={pageSize}>{pageSize} 条</option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={isLoading || recordData.page <= 1}
-            onClick={() => changePage(recordData.page - 1)}
-          >
-            上一页
-          </button>
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={isLoading || recordData.page >= recordData.totalPages}
-            onClick={() => changePage(recordData.page + 1)}
-          >
-            下一页
-          </button>
-        </div>
+              <Trash2 size={14} aria-hidden="true" />
+              批量删除
+            </button>
+          </span>
+        ) : null}
       </div>
 
-      {pendingDeletionRecordIds.length > 0 ? (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={() => {
-            if (!isDeleting) {
-              setPendingDeletionRecordIds([]);
-            }
-          }}
-        >
-          <div
-            className="modal-dialog modal-dialog-compact"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-records-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <h2 id="delete-records-title">
-              {pendingDeletionRecordIds.length === 1 ? "删除这条记录？" : "批量删除记录？"}
-            </h2>
-            <p>
-              将永久删除本系统中的 {pendingDeletionRecordIds.length} 条 Key 记录，
-              包括本地用量历史和已加密的完整 Key。
-            </p>
-            <p className="delete-confirmation-summary">
-              New API 上游真实渠道不会被删除；删除后，本系统也不会再同步这些渠道。
-            </p>
-            <div className="modal-actions">
-              <button
-                className="button button-secondary"
-                type="button"
-                disabled={isDeleting}
-                onClick={() => setPendingDeletionRecordIds([])}
-              >
-                取消
-              </button>
-              <button
-                className="button button-danger"
-                type="button"
-                disabled={isDeleting}
-                onClick={deleteRecords}
-              >
-                {isDeleting ? "正在删除..." : `确认删除 ${pendingDeletionRecordIds.length} 条`}
-              </button>
-            </div>
-          </div>
+      <div className="table-card" aria-busy={isLoading}>
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th className="selection-column">
+                  <input
+                    className="checkbox"
+                    type="checkbox"
+                    aria-label="全选当前页"
+                    checked={allCurrentPageRecordsSelected}
+                    disabled={recordData.records.length === 0 || isLoading || isDeleting}
+                    onChange={toggleCurrentPageSelection}
+                  />
+                </th>
+                <th>实例</th>
+                <th>渠道</th>
+                <th>Key</th>
+                <th>状态</th>
+                <th className="align-right">余额</th>
+                <th className="align-right">累计用量</th>
+                <th>导入时间</th>
+                <th>最后同步</th>
+                <th className="align-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recordData.records.map((record) => (
+                <tr key={record.id} className={selectedRecordIds.includes(record.id) ? "is-selected" : ""}>
+                  <td className="selection-column">
+                    <input
+                      className="checkbox"
+                      type="checkbox"
+                      aria-label={`选择记录 ${record.channelName}`}
+                      checked={selectedRecordIds.includes(record.id)}
+                      disabled={isLoading || isDeleting}
+                      onChange={() => toggleRecordSelection(record.id)}
+                    />
+                  </td>
+                  <td><strong>{record.instanceName}</strong></td>
+                  <td>
+                    <div className="cell-stack">
+                      <strong>{record.channelName}</strong>
+                      <span className="cell-muted">ID {record.newApiChannelId} · {record.group}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="key-cell">
+                      <span className="cell-mono key-value">{revealedKeys[record.id] || record.keyMask}</span>
+                      {record.keyAvailable ? (
+                        <>
+                          <button
+                            className="btn btn-ghost btn-icon btn-xs"
+                            type="button"
+                            title={revealedKeys[record.id] ? "隐藏完整 Key" : "显示完整 Key"}
+                            aria-label={revealedKeys[record.id] ? "隐藏完整 Key" : "显示完整 Key"}
+                            disabled={loadingKeyRecordId === record.id}
+                            onClick={() => toggleRecordKeyVisibility(record)}
+                          >
+                            {revealedKeys[record.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon btn-xs"
+                            type="button"
+                            title="复制完整 Key"
+                            aria-label="复制完整 Key"
+                            disabled={loadingKeyRecordId === record.id}
+                            onClick={() => copyRecordKey(record)}
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <span className="tag tag-muted">旧记录不可恢复</span>
+                      )}
+                    </div>
+                  </td>
+                  <td><StatusText status={record.statusLabel} /></td>
+                  <td className="align-right cell-number">{formatUsd(record.balanceUsd)}</td>
+                  <td className="align-right cell-number">{formatUsd(record.usedUsd)}</td>
+                  <td className="cell-muted">{formatDateTime(record.importedAt, "未知时间")}</td>
+                  <td className="cell-muted">{formatDateTime(record.lastSyncedAt, "尚未同步")}</td>
+                  <td className="align-right">
+                    <div className="row-actions">
+                      <button
+                        className="btn btn-outline btn-sm"
+                        type="button"
+                        onClick={() => onOpenInstance(record.instanceId)}
+                      >
+                        进入
+                        <ArrowRight size={14} aria-hidden="true" />
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm is-danger"
+                        type="button"
+                        title="删除记录"
+                        aria-label={`删除记录 ${record.channelName}`}
+                        disabled={isDeleting}
+                        onClick={() => openDeleteConfirmation([record.id])}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ) : null}
-    </section>
+        {!isLoading && recordData.records.length === 0 ? (
+          <EmptyState
+            icon={Inbox}
+            title="没有符合条件的 Key 记录"
+            description="通过实例工作区导入渠道后，记录会出现在这里。"
+          />
+        ) : null}
+        <Pagination
+          page={recordData.page}
+          totalPages={recordData.totalPages}
+          total={recordData.total}
+          pageSize={recordData.pageSize}
+          pageSizeOptions={PAGE_SIZE_OPTIONS}
+          disabled={isLoading}
+          onPageChange={changePage}
+          onPageSizeChange={changePageSize}
+        />
+      </div>
+
+      <ConfirmDialog
+        open={pendingDeletionRecordIds.length > 0}
+        title={pendingDeletionRecordIds.length === 1 ? "删除这条记录？" : "批量删除记录？"}
+        confirmLabel={`确认删除 ${pendingDeletionRecordIds.length} 条`}
+        busyLabel="正在删除..."
+        isBusy={isDeleting}
+        onConfirm={deleteRecords}
+        onCancel={() => setPendingDeletionRecordIds([])}
+      >
+        <p>
+          将永久删除本系统中的 {pendingDeletionRecordIds.length} 条 Key 记录，
+          包括本地用量历史和已加密的完整 Key。
+        </p>
+        <p className="callout callout-warning">
+          New API 上游真实渠道不会被删除；删除后，本系统也不会再同步这些渠道。
+        </p>
+      </ConfirmDialog>
+    </div>
   );
 }

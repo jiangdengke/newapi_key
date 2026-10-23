@@ -10,6 +10,7 @@
 - Claude 固定支持三个 Claude Opus 模型；OpenAI 固定支持 `gpt-5.6-sol`；Grok 固定支持当前 10 个 Grok 4.20、4.3、4.5、Build、Imagine 图像和视频模型。
 - 会动态加载 New API 当前已有分组，Claude、OpenAI、Grok 导入时均可单独选择一个分组；默认优先选择 `anthropic`、`openai`、`xai`。
 - Claude、OpenAI 与 Grok 通过同一导入面板中的并列按钮切换，未提交的输入内容分别保留。
+- 界面沿用 New API 控制台风格：左侧导航、浅色与深色主题，并适配移动端。
 - 同步渠道累计用量，并在脱敏 Key 首次开始产生用量时显示轻提示。
 - 支持实例级渠道优先级和权重。
 - SQLite 保存实例配置、访问会话和脱敏渠道历史。

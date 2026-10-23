@@ -1,13 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react";
 
 import { requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
+import { BrandName } from "./app-shell.js";
 import LoginView from "./login-view.js";
+import ThemeToggle from "./theme-toggle.js";
+import { Field, PasswordInput, Segmented, Spinner } from "./ui.js";
 
-export default function AccessGateway({ onAuthenticated }) {
-  const [showAdministratorLogin, setShowAdministratorLogin] = useState(false);
+const AUTH_MODES = [
+  { value: "access", label: "访问 Key", icon: KeyRound },
+  { value: "admin", label: "管理员", icon: ShieldCheck },
+];
+
+function AccessKeyForm({ onAuthenticated }) {
   const [accessKey, setAccessKey] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,50 +41,61 @@ export default function AccessGateway({ onAuthenticated }) {
     }
   }
 
-  if (showAdministratorLogin) {
-    return (
-      <LoginView
-        onAuthenticated={onAuthenticated}
-        onBack={() => setShowAdministratorLogin(false)}
-      />
-    );
-  }
+  return (
+    <form className="auth-form" onSubmit={handleAccessSubmit}>
+      <Field label="实例访问 Key" hint="由管理员为每个实例单独生成，以 nai_ 开头。" error={errorMessage}>
+        <PasswordInput
+          autoComplete="off"
+          placeholder="nai_..."
+          spellCheck="false"
+          value={accessKey}
+          onChange={(event) => setAccessKey(event.target.value)}
+          autoFocus
+          required
+        />
+      </Field>
+      <button className="btn btn-primary btn-block" disabled={isSubmitting}>
+        {isSubmitting ? <Spinner /> : <ArrowRight size={15} aria-hidden="true" />}
+        {isSubmitting ? "正在验证..." : "进入工作区"}
+      </button>
+    </form>
+  );
+}
+
+export default function AccessGateway({ onAuthenticated }) {
+  const [authMode, setAuthMode] = useState("access");
+  const isAccessMode = authMode === "access";
 
   return (
-    <main className="login-page">
-      <section className="login-card">
-        <div className="brand-mark" aria-hidden="true">N</div>
-        <p className="eyebrow">NEW API WORKSPACE</p>
-        <h1>进入实例</h1>
-        <p className="login-description">
-          输入管理员分配的实例访问 Key，进入对应的 New API 渠道工作区。
-        </p>
-
-        <form className="login-form" onSubmit={handleAccessSubmit}>
-          <label className="field">
-            <span>实例访问 Key</span>
-            <input
-              type="password"
-              autoComplete="off"
-              placeholder="nai_..."
-              value={accessKey}
-              onChange={(event) => setAccessKey(event.target.value)}
-              required
-            />
-          </label>
-          {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
-          <button className="button button-primary button-block" disabled={isSubmitting}>
-            {isSubmitting ? "正在验证..." : "进入工作区"}
-          </button>
-          <button
-            className="button button-secondary button-block"
-            type="button"
-            onClick={() => setShowAdministratorLogin(true)}
-          >
-            管理员登录
-          </button>
-        </form>
-      </section>
-    </main>
+    <div className="auth-page">
+      <header className="auth-header">
+        <BrandName />
+        <ThemeToggle />
+      </header>
+      <main className="auth-main">
+        <section className="auth-card">
+          <h1>{isAccessMode ? "进入实例" : "管理员登录"}</h1>
+          <p className="auth-description">
+            {isAccessMode
+              ? "输入管理员分配的访问 Key，进入对应 New API 实例的渠道工作区。"
+              : "登录后维护 New API 实例，并为每个实例生成独立的访问 Key。"}
+          </p>
+          <Segmented
+            options={AUTH_MODES}
+            value={authMode}
+            onChange={setAuthMode}
+            ariaLabel="选择登录方式"
+          />
+          {isAccessMode ? (
+            <AccessKeyForm onAuthenticated={onAuthenticated} />
+          ) : (
+            <LoginView onAuthenticated={onAuthenticated} />
+          )}
+        </section>
+      </main>
+      <footer className="auth-footer">
+        批量导入 Claude、OpenAI 与 Grok 渠道 · Key 加密保存
+      </footer>
+    </div>
   );
 }

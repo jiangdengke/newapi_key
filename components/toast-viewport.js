@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CircleAlert, CircleCheck, Info, X } from "lucide-react";
 
 import { TOAST_EVENT_NAME } from "../lib/toast.js";
+
+const TOAST_ICONS = Object.freeze({
+  success: CircleCheck,
+  info: Info,
+  error: CircleAlert,
+});
 
 const TOAST_LIFETIMES = Object.freeze({
   success: 3_500,
@@ -44,22 +51,23 @@ export default function ToastViewport() {
 
   return (
     <div className="toast-viewport" aria-live="polite" aria-atomic="false">
-      {toasts.map((toast) => (
-        <div className={`toast toast-${toast.type}`} role="status" key={toast.id}>
-          <span className="toast-icon" aria-hidden="true">
-            {toast.type === "success" ? "✓" : toast.type === "error" ? "!" : "i"}
-          </span>
-          <span className="toast-message">{toast.message}</span>
-          <button
-            className="toast-close"
-            type="button"
-            aria-label="关闭提示"
-            onClick={() => dismissToast(toast.id)}
-          >
-            ×
-          </button>
-        </div>
-      ))}
+      {toasts.map((toast) => {
+        const ToastIcon = TOAST_ICONS[toast.type];
+        return (
+          <div className={`toast toast-${toast.type}`} role="status" key={toast.id}>
+            <ToastIcon className="toast-icon" size={18} aria-hidden="true" />
+            <span className="toast-message">{toast.message}</span>
+            <button
+              className="toast-close"
+              type="button"
+              aria-label="关闭提示"
+              onClick={() => dismissToast(toast.id)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

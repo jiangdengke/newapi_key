@@ -1,9 +1,37 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  CircleCheck,
+  CircleX,
+  FileInput,
+  History,
+  Inbox,
+  KeyRound,
+  ListChecks,
+  RefreshCw,
+  Rocket,
+  Search,
+  Wallet,
+} from "lucide-react";
 
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
+import { formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
+import {
+  EmptyState,
+  Field,
+  PageHeader,
+  Pagination,
+  PasswordInput,
+  Segmented,
+  Select,
+  Spinner,
+  StatCard,
+  StatusText,
+  Switch,
+} from "./ui.js";
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -11,6 +39,15 @@ const AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS = 30_000;
 const CLAUDE_CHANNEL_KIND = "claude";
 const OPENAI_CHANNEL_KIND = "openai";
 const GROK_CHANNEL_KIND = "grok";
+const CHANNEL_KIND_OPTIONS = [
+  { value: "claude", label: "Claude" },
+  { value: "openai", label: "OpenAI" },
+  { value: "grok", label: "Grok" },
+];
+const WORKSPACE_VIEW_OPTIONS = [
+  { value: "import", label: "渠道导入", icon: FileInput },
+  { value: "records", label: "导入记录", icon: History },
+];
 const CHANNEL_KIND_DETAILS = Object.freeze({
   [CLAUDE_CHANNEL_KIND]: Object.freeze({
     label: "Claude",
@@ -87,36 +124,6 @@ function normalizeKeyLines(rawKeys) {
   return uniqueKeys;
 }
 
-function formatUsd(usedUsd) {
-  const normalizedAmount = Number(usedUsd) || 0;
-  return normalizedAmount.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: normalizedAmount > 0 && normalizedAmount < 0.01 ? 6 : 4,
-  });
-}
-
-function formatDateTime(rawDateTime) {
-  if (!rawDateTime) {
-    return "尚未同步";
-  }
-  const parsedDate = new Date(rawDateTime);
-  return Number.isNaN(parsedDate.getTime())
-    ? "未知时间"
-    : parsedDate.toLocaleString("zh-CN", { hour12: false });
-}
-
-function getStatusText(statusLabel) {
-  if (statusLabel === "enabled") {
-    return "已启用";
-  }
-  if (statusLabel === "missing") {
-    return "渠道不存在";
-  }
-  return "已停用";
-}
-
 function showUsageStartedNotifications(usageStartedRecords) {
   for (const usageStartedRecord of usageStartedRecords || []) {
     showToast(
@@ -128,7 +135,13 @@ function showUsageStartedNotifications(usageStartedRecords) {
   }
 }
 
-export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
+export default function InstanceWorkspace({
+  instanceId,
+  view,
+  onViewChange,
+  isAdministrator,
+  onBack,
+}) {
   const [configuration, setConfiguration] = useState(null);
   const [claudeKeysText, setClaudeKeysText] = useState("");
   const [openAiKeysText, setOpenAiKeysText] = useState("");
@@ -498,12 +511,12 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     }
   }
 
-  async function changeHistoryPageSize(event) {
+  async function changeHistoryPageSize(nextPageSize) {
     try {
       await loadHistory({
         ...historyQuery,
         page: 1,
-        pageSize: Number(event.target.value),
+        pageSize: nextPageSize,
       });
     } catch (error) {
       const errorMessage = `调整每页数量失败：${error?.message || "未知错误"}`;
@@ -568,20 +581,26 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     return () => window.clearInterval(intervalId);
   }, [isAutomaticSynchronizationEnabled]);
 
+  const backButton = isAdministrator ? (
+    <button className="btn btn-ghost btn-sm back-button" type="button" onClick={onBack}>
+      <ArrowLeft size={14} aria-hidden="true" />
+      返回实例列表
+    </button>
+  ) : null;
+
   if (!configuration) {
     return (
-      <main className="loading-page compact-loading">
-        <div className="loading-indicator" />
-        <p>{pageError || "正在读取实例配置..."}</p>
-        {canGoBack ? <button className="button button-secondary" type="button" onClick={onGoBack}>返回管理端</button> : null}
-      </main>
+      <div className="page">
+        {backButton}
+        <div className="page-loading">
+          {pageError ? null : <Spinner size={20} />}
+          <p>{pageError || "正在读取实例配置..."}</p>
+        </div>
+      </div>
     );
   }
 
   const instance = configuration.instance;
-  const isClaudeSelected = selectedChannelKind === CLAUDE_CHANNEL_KIND;
-  const isOpenAiSelected = selectedChannelKind === OPENAI_CHANNEL_KIND;
-  const isGrokSelected = selectedChannelKind === GROK_CHANNEL_KIND;
   const selectedChannelDetails = getChannelKindDetails(selectedChannelKind);
   const selectedInputByChannelKind = {
     [CLAUDE_CHANNEL_KIND]: {
@@ -615,68 +634,66 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     : 0;
 
   return (
-    <main className="page-shell workspace-page">
-      <div className="page-title-row">
-        <div>
-          {canGoBack ? <button className="back-link" type="button" onClick={onGoBack}>← 返回管理端</button> : null}
-          <p className="eyebrow">INSTANCE WORKSPACE</p>
-          <h1>{instance.name}</h1>
-          <p className="page-description instance-url">当前 New API：{instance.baseUrl}</p>
-        </div>
-        <span className={`instance-state ${instance.enabled ? "enabled" : "disabled"}`}>
-          {instance.enabled ? "实例已启用" : "实例已停用"}
-        </span>
-      </div>
+    <div className="page">
+      {backButton}
+      <PageHeader
+        title={instance.name}
+        description={`New API：${instance.baseUrl}`}
+        actions={(
+          <>
+            <StatusText status={instance.enabled ? "enabled" : "disabled"}>
+              {instance.enabled ? "实例已启用" : "实例已停用"}
+            </StatusText>
+            {isAdministrator ? (
+              <Segmented
+                options={WORKSPACE_VIEW_OPTIONS}
+                value={view}
+                onChange={onViewChange}
+                ariaLabel="切换工作区页面"
+              />
+            ) : null}
+          </>
+        )}
+      />
 
-      {pageError ? <p className="form-error panel-message">{pageError}</p> : null}
+      {pageError ? <p className="callout callout-error">{pageError}</p> : null}
 
-      <form
-        onSubmit={(event) => importChannels(event, selectedChannelKind)}
-        autoComplete="off"
-      >
-        <section className="panel">
-          <div
-            className="channel-kind-switch three-options"
-            aria-label="选择导入渠道类型"
+      {view === "import" ? (
+        <div className="workspace-grid">
+          <form
+            className="card"
+            onSubmit={(event) => importChannels(event, selectedChannelKind)}
+            autoComplete="off"
           >
-            <button
-              className={`channel-kind-option ${isClaudeSelected ? "active" : ""}`}
-              type="button"
-              aria-pressed={isClaudeSelected}
-              disabled={isImporting}
-              onClick={() => setSelectedChannelKind(CLAUDE_CHANNEL_KIND)}
-            >
-              Claude 渠道
-            </button>
-            <button
-              className={`channel-kind-option ${isOpenAiSelected ? "active" : ""}`}
-              type="button"
-              aria-pressed={isOpenAiSelected}
-              disabled={isImporting}
-              onClick={() => setSelectedChannelKind(OPENAI_CHANNEL_KIND)}
-            >
-              OpenAI 渠道
-            </button>
-            <button
-              className={`channel-kind-option ${isGrokSelected ? "active" : ""}`}
-              type="button"
-              aria-pressed={isGrokSelected}
-              disabled={isImporting}
-              onClick={() => setSelectedChannelKind(GROK_CHANNEL_KIND)}
-            >
-              Grok 渠道
-            </button>
-          </div>
-          <div className="panel-heading">
-            <div>
-              <h2>导入 {selectedChannelDetails.label} 渠道</h2>
-              <p>{selectedChannelDescription}</p>
+            <div className="card-header">
+              <div>
+                <h2>导入 {selectedChannelDetails.label} 渠道</h2>
+                <p>{selectedChannelDescription}</p>
+              </div>
             </div>
-          </div>
-          <label className="field channel-group-field">
-            <span>分组</span>
-            <div className="channel-group-picker">
-              <select
+            <Segmented
+              options={CHANNEL_KIND_OPTIONS}
+              value={selectedChannelKind}
+              onChange={setSelectedChannelKind}
+              disabled={isImporting}
+              ariaLabel="选择导入渠道类型"
+            />
+            <Field
+              label="分组"
+              error={groupError}
+              extra={(
+                <button
+                  className="btn btn-ghost btn-xs"
+                  type="button"
+                  disabled={!instance.enabled || isImporting || isLoadingGroups}
+                  onClick={() => loadAvailableGroups({ showSuccess: true })}
+                >
+                  <RefreshCw size={13} className={isLoadingGroups ? "spin" : ""} aria-hidden="true" />
+                  {isLoadingGroups ? "加载中..." : "刷新分组"}
+                </button>
+              )}
+            >
+              <Select
                 value={selectedAvailableGroup}
                 disabled={!instance.enabled || isImporting || isLoadingGroups}
                 onChange={(event) => setSelectedGroups((currentSelectedGroups) => ({
@@ -692,132 +709,185 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
                 ) : availableGroups.map((group) => (
                   <option key={group} value={group}>{group}</option>
                 ))}
-              </select>
+              </Select>
+            </Field>
+            <Field
+              label={selectedChannelDetails.keyLabel}
+              extra={(
+                <span className="field-counter">
+                  共 {selectedInput.uniqueKeys.length} 个有效 Key
+                </span>
+              )}
+            >
+              <textarea
+                className="textarea textarea-mono"
+                rows="10"
+                placeholder={selectedChannelDetails.keyPlaceholder}
+                spellCheck="false"
+                value={selectedInput.keysText}
+                onChange={(event) => selectedInput.setKeysText(event.target.value)}
+                disabled={!instance.enabled || isImporting}
+                required
+              />
+            </Field>
+            {!instance.enabled ? (
+              <p className="callout callout-warning">该实例已停用，暂时无法导入渠道。</p>
+            ) : null}
+            <div className="card-actions">
               <button
-                className="button button-secondary"
-                type="button"
-                disabled={!instance.enabled || isImporting || isLoadingGroups}
-                onClick={() => loadAvailableGroups({ showSuccess: true })}
+                className="btn btn-primary"
+                disabled={!instance.enabled || isImporting || isGroupSelectionUnavailable}
               >
-                {isLoadingGroups ? "加载中..." : "刷新分组"}
+                {isImporting ? <Spinner /> : <Rocket size={15} aria-hidden="true" />}
+                {isImporting ? "正在创建..." : `开始创建 ${selectedChannelDetails.label} 渠道`}
               </button>
             </div>
-            {groupError ? <small className="channel-group-message">{groupError}</small> : null}
-          </label>
-          <label className="field">
-            <span>{selectedChannelDetails.keyLabel}</span>
-            <textarea
-              rows="7"
-              placeholder={selectedChannelDetails.keyPlaceholder}
-              spellCheck="false"
-              value={selectedInput.keysText}
-              onChange={(event) => selectedInput.setKeysText(event.target.value)}
-              disabled={!instance.enabled || isImporting}
-              required
-            />
-          </label>
-          <div className="key-summary">
-            <span>
-              共 {selectedInput.uniqueKeys.length} 个有效 {selectedChannelDetails.label} Key
-            </span>
-          </div>
-          <div className="submit-row">
-            <button
-              className="button button-primary"
-              disabled={!instance.enabled || isImporting || isGroupSelectionUnavailable}
-            >
-              {isImporting ? "正在创建..." : `开始创建 ${selectedChannelDetails.label} 渠道`}
-            </button>
-          </div>
-        </section>
-      </form>
+          </form>
 
-      <section className={`panel result-panel ${progress.fatal ? "has-fatal-error" : ""}`} aria-live="polite">
-        <div className="result-header">
-          <div><h2>执行反馈</h2><p>{progress.summary}</p></div>
-          <div className="result-counters">
-            <span className="counter counter-total">总数 <strong>{progress.total}</strong></span>
-            <span className="counter counter-success">成功 <strong>{progress.success}</strong></span>
-            <span className="counter counter-failure">失败 <strong>{progress.failure}</strong></span>
-          </div>
-        </div>
-        <div className="progress-track" aria-hidden="true"><div className="progress-fill" style={{ width: `${progressPercentage}%` }} /></div>
-        <div className="result-list">
-          {progress.results.length === 0 ? <div className="empty-state">提交后将在这里逐条显示创建结果。</div> : null}
-          {progress.results.map((result) => (
-            <div className={`result-item result-${result.status}`} key={result.index}>
-              <span className="result-status">{result.status === "success" ? "✓" : result.status === "failure" ? "!" : "..."}</span>
-              <div><strong>{result.name}</strong><span className="result-message">{result.message}</span></div>
+          <section className={`card result-card ${progress.fatal ? "has-fatal-error" : ""}`} aria-live="polite">
+            <div className="card-header">
+              <div>
+                <h2>执行反馈</h2>
+                <p>{progress.summary}</p>
+              </div>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel history-panel" aria-live="polite">
-        <div className="history-header">
-          <div><h2>已导入渠道</h2><p>{historyMessage}</p></div>
-          <div className="record-sync-actions">
-            <label className="automatic-sync-control">
-              <input
-                type="checkbox"
-                checked={isAutomaticSynchronizationEnabled}
-                disabled={!instance.enabled || isImporting}
-                onChange={(event) => setIsAutomaticSynchronizationEnabled(
-                  event.target.checked,
-                )}
+            <div className="result-counters">
+              <span className="counter">总数 <strong>{progress.total}</strong></span>
+              <span className="counter counter-success">成功 <strong>{progress.success}</strong></span>
+              <span className="counter counter-failure">失败 <strong>{progress.failure}</strong></span>
+            </div>
+            <div className="progress-track" aria-hidden="true">
+              <div className="progress-fill" style={{ width: `${progressPercentage}%` }} />
+            </div>
+            {progress.results.length === 0 ? (
+              <EmptyState
+                icon={ListChecks}
+                title="等待提交"
+                description="提交后将在这里逐条显示每个渠道的创建结果。"
               />
-              自动同步（30 秒）
-            </label>
-            <button
-              className="button button-secondary"
-              type="button"
-              disabled={!instance.enabled || isImporting || isSynchronizing}
-              onClick={() => synchronizeHistory()}
-            >
-              {isSynchronizing ? "正在同步..." : "刷新余额和用量"}
-            </button>
-          </div>
-        </div>
-        <form className="history-search-form" autoComplete="off" onSubmit={submitHistorySearch}>
-          <input type="password" placeholder="粘贴完整 Key 精确查询" spellCheck="false" value={historySearchInput} onChange={(event) => setHistorySearchInput(event.target.value)} />
-          <button className="button button-secondary">查询</button>
-          <button className="button button-secondary" type="button" onClick={clearHistorySearch}>清除</button>
-        </form>
-        <div className="history-table-shell">
-          <table className="history-table">
-            <thead><tr><th>渠道</th><th>Key</th><th>状态</th><th>余额</th><th>累计用量</th><th>导入时间</th><th>最后同步</th></tr></thead>
-            <tbody>
-              {historyData.records.map((record) => (
-                <tr key={record.id}>
-                  <td><strong>{record.channelName}</strong><small>ID {record.newApiChannelId} · {record.group}</small></td>
-                  <td className="history-key">{record.keyMask}</td>
-                  <td><span className={`history-status history-status-${record.statusLabel}`}>{getStatusText(record.statusLabel)}</span></td>
-                  <td className="history-usage">{formatUsd(record.balanceUsd)}</td>
-                  <td className="history-usage">{formatUsd(record.usedUsd)}</td>
-                  <td>{formatDateTime(record.importedAt)}</td>
-                  <td>{formatDateTime(record.lastSyncedAt)}</td>
-                </tr>
-              ))}
-              {historyData.records.length === 0 ? <tr><td className="history-empty" colSpan="7">{historyQuery.key ? "没有找到该 Key 对应的渠道。" : "暂时没有通过本工具导入的渠道。"}</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-        <div className="history-pagination">
-          <span>第 {historyData.page} / {historyData.totalPages} 页</span>
-          <div className="pagination-controls">
-            <label className="page-size-control">
-              <span>每页</span>
-              <select value={historyData.pageSize} onChange={changeHistoryPageSize}>
-                {PAGE_SIZE_OPTIONS.map((pageSize) => (
-                  <option key={pageSize} value={pageSize}>{pageSize} 条</option>
+            ) : (
+              <ul className="result-list">
+                {progress.results.map((result) => (
+                  <li className={`result-item result-${result.status}`} key={result.index}>
+                    <span className="result-icon" aria-hidden="true">
+                      {result.status === "success" ? <CircleCheck size={16} />
+                        : result.status === "failure" ? <CircleX size={16} />
+                          : <Spinner size={16} />}
+                    </span>
+                    <div>
+                      <strong>{result.name}</strong>
+                      <span>{result.message}</span>
+                    </div>
+                  </li>
                 ))}
-              </select>
-            </label>
-            <button className="button button-secondary" type="button" disabled={historyData.page <= 1} onClick={() => changeHistoryPage(historyData.page - 1)}>上一页</button>
-            <button className="button button-secondary" type="button" disabled={historyData.page >= historyData.totalPages} onClick={() => changeHistoryPage(historyData.page + 1)}>下一页</button>
-          </div>
+              </ul>
+            )}
+          </section>
         </div>
-      </section>
-    </main>
+      ) : (
+        <>
+          <div className="stat-grid">
+            <StatCard icon={ListChecks} label="已导入渠道" value={historyData.total} hint={historyQuery.key ? "按当前 Key 查询统计" : "通过本工具导入的渠道"} />
+            <StatCard icon={Wallet} label="余额合计" value={formatUsd(historyData.totalBalanceUsd)} hint="来自 New API 渠道余额" tone="success" />
+            <StatCard icon={KeyRound} label="累计用量" value={formatUsd(historyData.totalUsedUsd)} hint="used_quota 换算为美元" tone="info" />
+          </div>
+
+          <div className="toolbar-row">
+            <form className="toolbar" autoComplete="off" onSubmit={submitHistorySearch}>
+              <PasswordInput
+                className="toolbar-input toolbar-input-wide"
+                aria-label="完整 Key"
+                placeholder="粘贴完整 Key 精确查询..."
+                spellCheck="false"
+                value={historySearchInput}
+                onChange={(event) => setHistorySearchInput(event.target.value)}
+              />
+              <button className="btn btn-outline">
+                <Search size={15} aria-hidden="true" />
+                查询
+              </button>
+              <button className="btn btn-ghost" type="button" onClick={clearHistorySearch}>清除</button>
+            </form>
+            <div className="toolbar-actions">
+              <Switch
+                checked={isAutomaticSynchronizationEnabled}
+                onChange={setIsAutomaticSynchronizationEnabled}
+                disabled={!instance.enabled || isImporting}
+                label="自动同步（30 秒）"
+              />
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={!instance.enabled || isImporting || isSynchronizing}
+                onClick={() => synchronizeHistory()}
+              >
+                <RefreshCw size={15} className={isSynchronizing ? "spin" : ""} aria-hidden="true" />
+                {isSynchronizing ? "正在同步..." : "刷新余额和用量"}
+              </button>
+            </div>
+          </div>
+
+          <div className="table-meta" aria-live="polite"><span>{historyMessage}</span></div>
+
+          <div className="table-card">
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>渠道</th>
+                    <th>Key</th>
+                    <th>状态</th>
+                    <th className="align-right">余额</th>
+                    <th className="align-right">累计用量</th>
+                    <th>导入时间</th>
+                    <th>最后同步</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyData.records.map((record) => (
+                    <tr key={record.id}>
+                      <td>
+                        <div className="cell-stack">
+                          <strong>{record.channelName}</strong>
+                          <span className="cell-muted">ID {record.newApiChannelId} · {record.group}</span>
+                        </div>
+                      </td>
+                      <td><span className="cell-mono">{record.keyMask}</span></td>
+                      <td><StatusText status={record.statusLabel} /></td>
+                      <td className="align-right cell-number">{formatUsd(record.balanceUsd)}</td>
+                      <td className="align-right cell-number">{formatUsd(record.usedUsd)}</td>
+                      <td className="cell-muted">{formatDateTime(record.importedAt)}</td>
+                      <td className="cell-muted">{formatDateTime(record.lastSyncedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {historyData.records.length === 0 ? (
+              <EmptyState
+                icon={Inbox}
+                title={historyQuery.key ? "没有找到该 Key 对应的渠道" : "暂时没有导入记录"}
+                description={historyQuery.key ? "请确认粘贴的是完整 Key。" : "在“渠道导入”中提交 Key 后，渠道会出现在这里。"}
+                action={!historyQuery.key ? (
+                  <button className="btn btn-outline" type="button" onClick={() => onViewChange("import")}>
+                    <FileInput size={15} aria-hidden="true" />
+                    去导入渠道
+                  </button>
+                ) : null}
+              />
+            ) : null}
+            <Pagination
+              page={historyData.page}
+              totalPages={historyData.totalPages}
+              total={historyData.total}
+              pageSize={historyData.pageSize}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              onPageChange={changeHistoryPage}
+              onPageSizeChange={changeHistoryPageSize}
+            />
+          </div>
+        </>
+      )}
+    </div>
   );
 }

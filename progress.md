@@ -1364,3 +1364,35 @@
 - `components/admin-dashboard.js`、`components/instance-workspace.js`、`app/globals.css`：移除 Admin Hub 界面和样式。
 - `test/admin-validation.test.js`、`test/application-store.test.js`、`test/authorization.test.js`、`test/instance-route.test.js`：更新测试。
 - 回滚方式：恢复上述文件到本轮开始前版本，并恢复升级前的 SQLite 备份；schema 7 删除的两列无法由旧版本自动恢复。
+
+## 2026-10-23 - Task: 前端改为 New API 控制台风格
+
+### What was done
+
+- 参照 New API v1.0.0-rc.45 默认主题的设计变量（主色 `#3ea4ec`、圆角 1rem、胶囊输入框与按钮）重写全部样式，支持跟随系统、浅色和深色主题，主题选择保存在浏览器本地并在首屏前生效。
+- 新增应用框架：顶部品牌栏与账号信息，左侧分组导航，内容区为带边框的圆角面板；窄屏下导航收起为抽屉。
+- 管理员导航分为“控制台”（实例管理、Key 记录）、“实例”（各实例快捷入口）和“个人”（账号安全）；修改密码从弹窗改为独立页面。
+- 实例管理改为表格加统计卡片；新增和编辑实例改为右侧抽屉，测试连接、访问 Key 和删除收进行内菜单，危险操作统一使用确认窗口；生成的访问 Key 在专用窗口中显示，点击遮罩不会关闭。
+- 访问者导航分为“渠道导入”和“导入记录”；导入页左侧为表单、右侧为实时执行反馈；记录页增加统计卡片，切换页面时保留未提交的 Key。
+- 登录页改为 New API 式居中表单，访问 Key 与管理员登录通过切换按钮选择，密码类输入框支持显示和隐藏。
+- 页面位置写入地址栏 hash（如 `#/instances/3/records`），刷新后保留当前页面。
+- 新增依赖 `lucide-react@1.52.0`，与 New API 使用相同的图标库。
+
+### Testing
+
+- `npm test`：通过；35 项测试全部通过。
+- `npm run build`：通过。
+- `npm audit`：0 个漏洞。
+- 使用本地演示数据和 Playwright 驱动 Chrome 截图检查浅色、深色、桌面和 390px 移动端页面。
+- Playwright 端到端检查 15 项全部通过：登录错误提示、抽屉新增和编辑实例、生成和复制访问 Key、停用访问 Key、删除实例、显示和复制完整 Key、实例筛选、批量删除记录、工作区页面切换保留草稿、刷新保留页面、主题切换持久化、密码长度校验和退出登录；页面无运行时错误。
+
+### Notes
+
+- `components/ui.js`：新增弹窗、抽屉、确认窗口、开关、下拉选择、行内菜单、分页、统计卡片等通用组件。
+- `components/app-shell.js`、`components/theme-toggle.js`、`lib/theme.js`：新增应用框架和主题切换。
+- `components/account-security.js`：新增账号安全页面。
+- `components/admin-dashboard.js` 重命名为 `components/admin-instances.js` 并重写界面。
+- `components/application-client.js`、`components/access-gateway.js`、`components/login-view.js`、`components/admin-records-overview.js`、`components/instance-workspace.js`、`components/toast-viewport.js`、`app/layout.js`、`app/globals.css`：按新布局重写。
+- `lib/format.js`：抽出金额、时间和渠道状态格式化函数，供多个页面共用。
+- `README.md`、`docs/nextjs-usage.md`：更新界面说明。
+- 回滚方式：恢复上述文件到本轮开始前版本并移除 `lucide-react` 依赖；本轮未修改接口、SQLite schema 或正式数据。

@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { LogIn } from "lucide-react";
 
 import { requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
+import { Field, PasswordInput, Spinner } from "./ui.js";
 
-export default function LoginView({ onAuthenticated, onBack }) {
+export default function LoginView({ onAuthenticated }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -33,48 +35,31 @@ export default function LoginView({ onAuthenticated, onBack }) {
   }
 
   return (
-    <main className="login-page">
-      <section className="login-card">
-        <div className="brand-mark" aria-hidden="true">N</div>
-        <p className="eyebrow">ADMIN CONSOLE</p>
-        <h1>管理员登录</h1>
-        <p className="login-description">
-          登录后维护 New API 实例，并为每个实例生成独立的访问 Key。
-        </p>
-
-        <form className="login-form" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>用户名</span>
-            <input
-              autoComplete="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>密码</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
-          <button className="button button-primary button-block" disabled={isSubmitting}>
-            {isSubmitting ? "正在登录..." : "登录"}
-          </button>
-          <button
-            className="button button-secondary button-block"
-            type="button"
-            onClick={onBack}
-          >
-            返回实例访问
-          </button>
-        </form>
-      </section>
-    </main>
+    <form className="auth-form" onSubmit={handleSubmit}>
+      <Field label="用户名">
+        <input
+          className="input"
+          autoComplete="username"
+          placeholder="输入管理员用户名"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          autoFocus
+          required
+        />
+      </Field>
+      <Field label="密码" error={errorMessage}>
+        <PasswordInput
+          autoComplete="current-password"
+          placeholder="输入密码"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+      </Field>
+      <button className="btn btn-primary btn-block" disabled={isSubmitting}>
+        {isSubmitting ? <Spinner /> : <LogIn size={15} aria-hidden="true" />}
+        {isSubmitting ? "正在登录..." : "登录"}
+      </button>
+    </form>
   );
 }
