@@ -11,6 +11,7 @@ import {
   validateModelList,
   ValidationError,
   DEFAULT_CHANNEL_MODELS,
+  parseAwsCredential,
 } from "../lib/validation.js";
 
 test("normalizeKeys removes blank and duplicate entries", () => {
@@ -110,7 +111,7 @@ test("validateImportInput accepts OpenAI and Grok channel kinds", () => {
       startNumber: 1,
       group: "openai",
     }),
-    (error) => error instanceof ValidationError && /claude、openai 或 grok/.test(error.message),
+    (error) => error instanceof ValidationError && /claude、openai、grok 或 aws/.test(error.message),
   );
 });
 
@@ -216,6 +217,7 @@ test("validateChannelModels fills missing channel kinds with defaults", () => {
     claude: ["claude-opus-4-9"],
     openai: [...DEFAULT_CHANNEL_MODELS.openai],
     grok: [...DEFAULT_CHANNEL_MODELS.grok],
+    aws: [...DEFAULT_CHANNEL_MODELS.aws],
   });
   assert.throws(() => validateChannelModels(["claude-opus-4-9"]), /渠道模型配置格式无效/);
 });
@@ -235,4 +237,45 @@ test("validateImportInput uses requested models or the channel kind defaults", (
     ["claude-opus-4-9"],
   );
   assert.throws(() => validateImportInput({ ...baseInput, models: [] }), /请至少为 Claude 渠道填写一个模型/);
+});
+
+test("parseAwsCredential detects AK/SK and API key formats", () => {
+  assert.deepEqual(
+    parseAwsCredential(" AKIAEXAMPLE000000001 | exampleSecretAccessKey000000001 | us-east-1 "),
+    {
+      keyType: "ak_sk",
+      region: "us-east-1",
+      secrets: ["AKIAEXAMPLE000000001", "exampleSecretAccessKey000000001"],
+    },
+  );
+  assert.deepEqual(parseAwsCredential("ABSKexampleBedrockApiKey0001|ap-northeast-1"), {
+    keyType: "api_key",
+    region: "ap-northeast-1",
+    secrets: ["ABSKexampleBedrockApiKey0001"],
+  });
+  assert.equal(parseAwsCredential("AKIAEXAMPLE000000001|exampleSecretAccessKey000000001|useast1"), null);
+  assert.equal(parseAwsCredential("AKIAEXAMPLE000000001|short|us-east-1"), null);
+  assert.equal(parseAwsCredential("sk-ant-api03-not-aws"), null);
+});
+
+test("validateImportInput validates AWS credentials and interface type", () => {
+  const baseInput = {
+    keys: ["AKIAEXAMPLE000000001|exampleSecretAccessKey000000001|us-east-1"],
+    channelKind: "aws",
+    group: "aws",
+    namePrefix: "aws",
+    startNumber: 1,
+    priority: 0,
+    weight: 0,
+  };
+  const importInput = validateImportInput(baseInput);
+  assert.equal(importInput.awsApiType, "invoke_model");
+  assert.deepEqual(importInput.models, [...DEFAULT_CHANNEL_MODELS.aws]);
+  assert.equal(validateImportInput({ ...baseInput, awsApiType: "mantle" }).awsApiType, "mantle");
+  assert.equal("awsApiType" in validateImportInput({ ...baseInput, channelKind: "claude" }), false);
+  assert.throws(() => validateImportInput({ ...baseInput, awsApiType: "converse" }), /AWS 接口必须是/);
+  assert.throws(
+    () => validateImportInput({ ...baseInput, keys: [baseInput.keys[0], "not-an-aws-key"] }),
+    /第 2 个 AWS 凭证格式无效/,
+  );
 });

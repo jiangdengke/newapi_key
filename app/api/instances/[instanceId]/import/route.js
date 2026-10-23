@@ -30,6 +30,7 @@ export async function POST(request, { params }) {
       requestBody?.channelKind,
       requestBody?.group,
       requestBody?.models,
+      requestBody?.awsApiType,
     );
     const eventIterator = channelImport.events();
     const textEncoder = new TextEncoder();

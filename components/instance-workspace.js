@@ -18,6 +18,7 @@ import {
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
 import { formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
+import { parseAwsCredential } from "../lib/validation.js";
 import RecordFilterBar, {
   CHANNEL_KIND_FILTER_LABELS,
   createRecordQuery,
@@ -45,10 +46,16 @@ const AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS = 30_000;
 const CLAUDE_CHANNEL_KIND = "claude";
 const OPENAI_CHANNEL_KIND = "openai";
 const GROK_CHANNEL_KIND = "grok";
+const AWS_CHANNEL_KIND = "aws";
+const AWS_API_TYPE_OPTIONS = [
+  { value: "invoke_model", label: "InvokeModel（旧接口）" },
+  { value: "mantle", label: "Mantle（Messages API）" },
+];
 const CHANNEL_KIND_OPTIONS = [
   { value: "claude", label: "Claude" },
   { value: "openai", label: "OpenAI" },
   { value: "grok", label: "Grok" },
+  { value: "aws", label: "AWS" },
 ];
 const WORKSPACE_VIEW_OPTIONS = [
   { value: "import", label: "渠道导入", icon: FileInput },
@@ -75,6 +82,13 @@ const CHANNEL_KIND_DETAILS = Object.freeze({
     keyPlaceholder: "每行粘贴一个官方 xAI Key",
     description: "使用官方 xAI Key 创建 Grok 渠道",
     defaultGroup: "xai",
+  }),
+  [AWS_CHANNEL_KIND]: Object.freeze({
+    label: "AWS",
+    keyLabel: "AWS 凭证",
+    keyPlaceholder: "每行一个凭证：\nAccessKey|SecretAccessKey|Region\n或 APIKey|Region",
+    description: "使用 Amazon Bedrock 凭证创建 AWS 渠道，每行可以是 AK/SK 或 API Key",
+    defaultGroup: "aws",
   }),
 });
 
@@ -107,6 +121,24 @@ function chooseAvailableGroup(availableGroups, currentGroup, defaultGroup) {
 function hasSameModels(firstModels, secondModels) {
   return firstModels.length === secondModels.length
     && firstModels.every((model, modelIndex) => model === secondModels[modelIndex]);
+}
+
+function describeAwsCredentials(credentials) {
+  let accessKeyCount = 0;
+  let apiKeyCount = 0;
+  let invalidCount = 0;
+  for (const credential of credentials) {
+    const parsedCredential = parseAwsCredential(credential);
+    if (!parsedCredential) {
+      invalidCount += 1;
+    } else if (parsedCredential.keyType === "ak_sk") {
+      accessKeyCount += 1;
+    } else {
+      apiKeyCount += 1;
+    }
+  }
+  return `AK/SK ${accessKeyCount} 个 · API Key ${apiKeyCount} 个`
+    + (invalidCount > 0 ? ` · ${invalidCount} 个格式无效` : "");
 }
 
 function createInitialProgress() {
@@ -157,6 +189,8 @@ export default function InstanceWorkspace({
   const [claudeKeysText, setClaudeKeysText] = useState("");
   const [openAiKeysText, setOpenAiKeysText] = useState("");
   const [grokKeysText, setGrokKeysText] = useState("");
+  const [awsKeysText, setAwsKeysText] = useState("");
+  const [awsApiType, setAwsApiType] = useState(AWS_API_TYPE_OPTIONS[0].value);
   const [selectedChannelKind, setSelectedChannelKind] = useState(CLAUDE_CHANNEL_KIND);
   const [availableGroups, setAvailableGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState(createDefaultSelectedGroups);
@@ -203,6 +237,10 @@ export default function InstanceWorkspace({
   const uniqueGrokKeys = useMemo(
     () => normalizeKeyLines(grokKeysText),
     [grokKeysText],
+  );
+  const uniqueAwsKeys = useMemo(
+    () => normalizeKeyLines(awsKeysText),
+    [awsKeysText],
   );
 
   async function loadConfiguration() {
@@ -424,6 +462,10 @@ export default function InstanceWorkspace({
         uniqueKeys: uniqueGrokKeys,
         setKeysText: setGrokKeysText,
       },
+      [AWS_CHANNEL_KIND]: {
+        uniqueKeys: uniqueAwsKeys,
+        setKeysText: setAwsKeysText,
+      },
     };
     const selectedImportInput = importInputByChannelKind[channelKind]
       ?? importInputByChannelKind[CLAUDE_CHANNEL_KIND];
@@ -466,6 +508,7 @@ export default function InstanceWorkspace({
           channelKind,
           group: selectedGroup,
           models: channelModels,
+          ...(channelKind === AWS_CHANNEL_KIND ? { awsApiType } : {}),
         }),
       });
       if (!response.ok || !response.body) {
@@ -495,6 +538,13 @@ export default function InstanceWorkspace({
     } catch (error) {
       const errorMessage = error?.message || "导入请求中断";
       setPageError(errorMessage);
+      setProgress((current) => ({
+        ...current,
+        fatal: true,
+        summary: current.results.length > 0
+          ? `导入中断：${errorMessage}`
+          : `导入未开始：${errorMessage}`,
+      }));
       showToast(errorMessage, { type: "error" });
     } finally {
       setKeysText(
@@ -628,6 +678,11 @@ export default function InstanceWorkspace({
       uniqueKeys: uniqueGrokKeys,
       setKeysText: setGrokKeysText,
     },
+    [AWS_CHANNEL_KIND]: {
+      keysText: awsKeysText,
+      uniqueKeys: uniqueAwsKeys,
+      setKeysText: setAwsKeysText,
+    },
   };
   const selectedInput = selectedInputByChannelKind[selectedChannelKind]
     ?? selectedInputByChannelKind[CLAUDE_CHANNEL_KIND];
@@ -725,6 +780,22 @@ export default function InstanceWorkspace({
                 ))}
               </Select>
             </Field>
+            {selectedChannelKind === AWS_CHANNEL_KIND ? (
+              <Field
+                label="AWS 接口"
+                hint="Mantle 支持 Claude 模型和自动提示缓存；旧模型和 Amazon Nova 请继续使用 InvokeModel。"
+              >
+                <Select
+                  value={awsApiType}
+                  disabled={!instance.enabled || isImporting}
+                  onChange={(event) => setAwsApiType(event.target.value)}
+                >
+                  {AWS_API_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </Select>
+              </Field>
+            ) : null}
             <Field
               label="模型"
               hint="只影响这一批导入的渠道，不会修改实例的默认模型。"
@@ -761,7 +832,9 @@ export default function InstanceWorkspace({
               label={selectedChannelDetails.keyLabel}
               extra={(
                 <span className="field-counter">
-                  共 {selectedInput.uniqueKeys.length} 个有效 Key
+                  {selectedChannelKind === AWS_CHANNEL_KIND
+                    ? describeAwsCredentials(uniqueAwsKeys)
+                    : `共 ${selectedInput.uniqueKeys.length} 个有效 Key`}
                 </span>
               )}
             >

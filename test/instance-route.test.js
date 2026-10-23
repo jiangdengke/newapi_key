@@ -628,3 +628,85 @@ test("import uses instance channel models and per-import model overrides", async
     await closeServer(mockNewApiServer);
   }
 });
+
+test("AWS import creates type 33 channels with key type and interface settings", async () => {
+  const createdChannelRequests = [];
+  const storedChannels = [];
+  const mockNewApiServer = createMockNewApiServer(createdChannelRequests, storedChannels);
+  const mockNewApiBaseUrl = await listenOnAvailablePort(mockNewApiServer);
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 24),
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+  const accessKeyCredential = "AKIAEXAMPLE000000001|exampleSecretAccessKey000000001|us-east-1";
+  const apiKeyCredential = "ABSKexampleBedrockApiKey0001|us-west-2";
+
+  try {
+    const instance = store.createInstance({
+      name: "AWS instance",
+      baseUrl: mockNewApiBaseUrl,
+      username: "new-api-administrator",
+      password: NEW_API_PASSWORD,
+      group: "anthropic",
+      namePrefix: "aws",
+      startNumber: 1,
+      continueFromExisting: true,
+      priority: 0,
+      weight: 0,
+      dateMode: "",
+      enabled: true,
+    });
+    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+    const request = createImportRequest(
+      instance.id,
+      session.token,
+      [accessKeyCredential, apiKeyCredential],
+      "aws",
+      "premium",
+    );
+    const requestBody = JSON.parse(await request.text());
+    const response = await importChannels(
+      new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: JSON.stringify({ ...requestBody, awsApiType: "mantle" }),
+      }),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    const responseText = await response.text();
+    assert.equal(responseText.includes("\"success\":2"), true);
+    assert.equal(responseText.includes("exampleSecretAccessKey000000001"), false);
+
+    assert.equal(createdChannelRequests.length, 2);
+    const [accessKeyChannel, apiKeyChannel] = createdChannelRequests.map((createdRequest) => createdRequest.channel);
+    assert.equal(accessKeyChannel.type, 33);
+    assert.equal(accessKeyChannel.key, accessKeyCredential);
+    assert.equal(accessKeyChannel.models, CLAUDE_MODELS.join(","));
+    assert.deepEqual(JSON.parse(accessKeyChannel.settings), {
+      aws_key_type: "ak_sk",
+      aws_api_type: "mantle",
+    });
+    assert.deepEqual(JSON.parse(apiKeyChannel.settings), {
+      aws_key_type: "api_key",
+      aws_api_type: "mantle",
+    });
+
+    const invalidResponse = await importChannels(
+      createImportRequest(instance.id, session.token, ["AKIAEXAMPLE000000001|missing-region"], "aws", "premium"),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal(invalidResponse.status, 400);
+    assert.match((await invalidResponse.json()).message, /AWS 凭证格式无效/);
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+    await closeServer(mockNewApiServer);
+  }
+});

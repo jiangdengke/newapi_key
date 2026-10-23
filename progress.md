@@ -1458,3 +1458,18 @@
 ### Testing
 
 - `npm test`：47 项全部通过；`npm run build` 通过；Playwright 端到端 7 组检查全部通过，页面无运行时错误。
+
+## 2026-10-23 - Task: 适配 AWS 渠道
+
+### What was done
+
+- 对照 New API v1.0.0-rc.45 的 AWS 渠道表单抓取真实创建请求：类型 `33`，Key 为 `AccessKey|SecretAccessKey|Region` 或 `APIKey|Region`，`settings` 中的 `aws_key_type` 取 `ak_sk` / `api_key`，`aws_api_type` 取 `invoke_model` / `mantle`。
+- 新增 AWS 渠道类型：默认模型与 Claude 相同并可按实例配置，默认分组优先 `aws`；每行凭证按分段数自动识别格式，两种可混合导入；导入页可选 AWS 接口，默认 InvokeModel，并实时显示 AK/SK、API Key 和格式无效的数量。
+- 凭证中的 AccessKey、SecretAccessKey 和 API Key 都加入错误信息脱敏；记录类型筛选新增 AWS。
+- 修复导入请求在开始前被拒绝时，执行反馈仍停在“正在查询”的问题。
+
+### Testing
+
+- `npm test`：50 项全部通过，新增凭证解析、导入校验和创建 type 33 渠道及 settings 的测试。
+- `npm run build`：通过。
+- 本地 rc.45 加 Playwright 端到端 6 项全部通过：无效凭证被拒绝且反馈显示原因，AK/SK 和 API Key 各一条导入成功，上游渠道类型 `33`、`aws_key_type` 分别为 `ak_sk` 和 `api_key`、接口为 `mantle`，记录类型筛选统计 AWS。

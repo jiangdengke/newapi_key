@@ -416,6 +416,7 @@ test("ApplicationStore keeps per-instance channel models and falls back to defau
     claude: ["claude-opus-4-9"],
     openai: ["gpt-5.7"],
     grok: ["grok-5"],
+    aws: ["claude-opus-4-9"],
   };
 
   try {
@@ -424,6 +425,7 @@ test("ApplicationStore keeps per-instance channel models and falls back to defau
       claude: ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
       openai: ["gpt-5.6-sol"],
       grok: instance.channelModels.grok,
+      aws: ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
     });
     assert.equal(instance.channelModels.grok.length, 10);
 
