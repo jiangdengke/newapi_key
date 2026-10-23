@@ -11,16 +11,20 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   ChevronsUpDown,
+  CirclePlus,
   Database,
   Ellipsis,
   Eye,
   EyeOff,
   LoaderCircle,
+  Search,
   X,
 } from "lucide-react";
 
@@ -554,6 +558,172 @@ export function StatusText({ status, children }) {
     <span className={`status status-${status}`}>
       <span className="status-dot" aria-hidden="true" />
       {children ?? getStatusText(status)}
+    </span>
+  );
+}
+
+export function useDebouncedValue(value, delayMilliseconds = 300) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedValue(value), delayMilliseconds);
+    return () => window.clearTimeout(timeoutId);
+  }, [value, delayMilliseconds]);
+  return debouncedValue;
+}
+
+export function SearchInput({ value, onChange, placeholder, className = "", "aria-label": ariaLabel }) {
+  return (
+    <span className={`input-affix input-search ${className}`}>
+      <Search size={15} aria-hidden="true" />
+      <input
+        className="input"
+        type="text"
+        aria-label={ariaLabel}
+        placeholder={placeholder}
+        spellCheck="false"
+        autoComplete="off"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {value ? (
+        <button
+          className="input-affix-button"
+          type="button"
+          aria-label={`清除${ariaLabel || "搜索内容"}`}
+          onClick={() => onChange("")}
+        >
+          <X size={14} />
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+export function FacetFilter({ label, value, options, onChange, allLabel }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [optionQuery, setOptionQuery] = useState("");
+  const containerRef = useRef(null);
+  const selectedOption = options.find((option) => option.value === value);
+  const totalCount = options.reduce((total, option) => total + (option.count || 0), 0);
+  const normalizedOptionQuery = optionQuery.trim().toLowerCase();
+  const visibleOptions = normalizedOptionQuery
+    ? options.filter((option) => String(option.label).toLowerCase().includes(normalizedOptionQuery))
+    : options;
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+    function handlePointerDown(event) {
+      if (!containerRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  function choose(nextValue) {
+    onChange(nextValue);
+    setIsOpen(false);
+    setOptionQuery("");
+  }
+
+  return (
+    <div className="facet" ref={containerRef}>
+      <button
+        className={`facet-trigger ${selectedOption ? "is-active" : ""}`}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((currentValue) => !currentValue)}
+      >
+        <CirclePlus size={15} aria-hidden="true" />
+        {label}
+        {selectedOption ? <span className="facet-selected">{selectedOption.label}</span> : null}
+      </button>
+      {isOpen ? (
+        <div className="facet-popover">
+          <span className="input-affix input-search facet-search">
+            <Search size={14} aria-hidden="true" />
+            <input
+              className="input"
+              type="text"
+              aria-label={`搜索${label}`}
+              placeholder={label}
+              value={optionQuery}
+              onChange={(event) => setOptionQuery(event.target.value)}
+              autoFocus
+            />
+          </span>
+          <div className="facet-options" role="listbox" aria-label={label}>
+            {normalizedOptionQuery ? null : (
+              <button
+                className={`facet-option ${value ? "" : "is-selected"}`}
+                type="button"
+                role="option"
+                aria-selected={!value}
+                onClick={() => choose("")}
+              >
+                <span className="facet-radio" aria-hidden="true" />
+                <span className="facet-option-label">{allLabel}</span>
+                <span className="facet-count">{totalCount}</span>
+              </button>
+            )}
+            {visibleOptions.map((option) => (
+              <button
+                className={`facet-option ${option.value === value ? "is-selected" : ""}`}
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                key={option.value}
+                onClick={() => choose(option.value)}
+              >
+                <span className="facet-radio" aria-hidden="true" />
+                <span className="facet-option-label">{option.label}</span>
+                <span className="facet-count">{option.count || 0}</span>
+              </button>
+            ))}
+            {visibleOptions.length === 0 ? <p className="facet-empty">没有匹配的选项</p> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function SortControl({ field, order, options, onChange }) {
+  const isAscending = order === "asc";
+  return (
+    <span className="sort-control">
+      <Select
+        className="sort-select"
+        aria-label="排序字段"
+        value={field}
+        onChange={(event) => onChange({ field: event.target.value, order })}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </Select>
+      <button
+        className="btn btn-outline btn-icon"
+        type="button"
+        title={isAscending ? "升序（点击切换为降序）" : "降序（点击切换为升序）"}
+        aria-label={isAscending ? "当前升序，切换为降序" : "当前降序，切换为升序"}
+        onClick={() => onChange({ field, order: isAscending ? "desc" : "asc" })}
+      >
+        {isAscending ? <ArrowUpNarrowWide size={15} /> : <ArrowDownWideNarrow size={15} />}
+      </button>
     </span>
   );
 }

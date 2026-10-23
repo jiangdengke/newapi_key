@@ -10,7 +10,6 @@ import {
   KeyRound,
   ListChecks,
   RefreshCw,
-  Search,
   Trash2,
   Wallet,
 } from "lucide-react";
@@ -18,31 +17,26 @@ import {
 import { requestJson } from "../lib/client-api.js";
 import { formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
+import RecordFilterBar, {
+  CHANNEL_KIND_FILTER_LABELS,
+  createRecordQuery,
+  DEFAULT_RECORD_SORT,
+  EMPTY_RECORD_FILTERS,
+} from "./record-filters.js";
 import {
   ConfirmDialog,
   EmptyState,
   PageHeader,
   Pagination,
-  PasswordInput,
-  Select,
   StatCard,
   StatusText,
   Switch,
+  useDebouncedValue,
 } from "./ui.js";
 
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const AUTOMATIC_SYNCHRONIZATION_INTERVAL_MILLISECONDS = 30_000;
-
-function createEmptyQuery(pageSize = DEFAULT_PAGE_SIZE) {
-  return {
-    instanceId: null,
-    channelName: "",
-    key: "",
-    page: 1,
-    pageSize,
-  };
-}
 
 function createEmptyRecordData() {
   return {
@@ -53,6 +47,7 @@ function createEmptyRecordData() {
     totalPages: 1,
     totalBalanceUsd: 0,
     totalUsedUsd: 0,
+    facets: null,
   };
 }
 
@@ -68,10 +63,13 @@ function showUsageStartedNotifications(usageStartedRecords) {
 }
 
 export default function AdminRecordsOverview({ instances, onOpenInstance }) {
-  const [instanceFilter, setInstanceFilter] = useState("");
-  const [channelNameFilter, setChannelNameFilter] = useState("");
-  const [keyFilter, setKeyFilter] = useState("");
-  const [activeQuery, setActiveQuery] = useState(createEmptyQuery);
+  const [filters, setFilters] = useState(EMPTY_RECORD_FILTERS);
+  const [sort, setSort] = useState(DEFAULT_RECORD_SORT);
+  const [activeQuery, setActiveQuery] = useState(() => createRecordQuery(
+    EMPTY_RECORD_FILTERS,
+    DEFAULT_RECORD_SORT,
+    { page: 1, pageSize: DEFAULT_PAGE_SIZE },
+  ));
   const [recordData, setRecordData] = useState(createEmptyRecordData);
   const [isLoading, setIsLoading] = useState(true);
   const [revealedKeys, setRevealedKeys] = useState({});
@@ -84,11 +82,16 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
   const [message, setMessage] = useState("正在读取全部 Key 记录...");
   const synchronizationInProgressRef = useRef(false);
   const automaticSynchronizationRef = useRef(null);
+  const recordRequestVersionRef = useRef(0);
+  const debouncedSearch = useDebouncedValue(filters.search);
+  const debouncedModel = useDebouncedValue(filters.model);
 
   async function loadRecords(nextQuery, {
     preserveSelection = false,
     showLoadingState = true,
   } = {}) {
+    const requestVersion = recordRequestVersionRef.current + 1;
+    recordRequestVersionRef.current = requestVersion;
     if (showLoadingState) {
       setIsLoading(true);
       setMessage("正在读取全部 Key 记录...");
@@ -98,6 +101,9 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
         method: "POST",
         body: JSON.stringify(nextQuery),
       });
+      if (recordRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       const loadedRecordData = responsePayload.data;
       setActiveQuery({
         ...nextQuery,
@@ -114,19 +120,40 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
         + formatUsd(loadedRecordData.totalUsedUsd),
       );
     } catch (error) {
+      if (recordRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       const errorMessage = `读取 Key 记录失败：${error?.message || "未知错误"}`;
       setMessage(errorMessage);
       showToast(errorMessage, { type: "error" });
     } finally {
-      if (showLoadingState) {
+      if (showLoadingState && recordRequestVersionRef.current === requestVersion) {
         setIsLoading(false);
       }
     }
   }
 
   useEffect(() => {
-    loadRecords(createEmptyQuery());
-  }, []);
+    loadRecords(createRecordQuery(
+      { ...filters, search: debouncedSearch, model: debouncedModel },
+      sort,
+      { page: 1, pageSize: activeQuery.pageSize },
+    ));
+  }, [
+    debouncedSearch,
+    debouncedModel,
+    filters.instanceId,
+    filters.statusLabel,
+    filters.channelKind,
+    filters.group,
+    sort.field,
+    sort.order,
+  ]);
+
+  function resetFilters() {
+    setFilters(EMPTY_RECORD_FILTERS);
+    setSort(DEFAULT_RECORD_SORT);
+  }
 
   async function synchronizeRecords({ automatic = false } = {}) {
     if (synchronizationInProgressRef.current) {
@@ -245,24 +272,6 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
     }
   }
 
-  async function submitFilters(event) {
-    event.preventDefault();
-    await loadRecords({
-      instanceId: instanceFilter ? Number(instanceFilter) : null,
-      channelName: channelNameFilter.trim(),
-      key: keyFilter.trim(),
-      page: 1,
-      pageSize: activeQuery.pageSize,
-    });
-  }
-
-  async function clearFilters() {
-    setInstanceFilter("");
-    setChannelNameFilter("");
-    setKeyFilter("");
-    await loadRecords(createEmptyQuery(activeQuery.pageSize));
-  }
-
   async function changePage(nextPage) {
     await loadRecords({ ...activeQuery, page: nextPage });
   }
@@ -321,6 +330,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
     }
   }
 
+  const hasActiveFilters = Object.values(filters).some(Boolean);
   const currentPageRecordIds = recordData.records.map((record) => record.id);
   const allCurrentPageRecordsSelected = currentPageRecordIds.length > 0
     && currentPageRecordIds.every((recordId) => selectedRecordIds.includes(recordId));
@@ -351,47 +361,20 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
       />
 
       <div className="stat-grid">
-        <StatCard icon={ListChecks} label="记录数" value={recordData.total} hint="按当前筛选条件统计" />
+        <StatCard icon={ListChecks} label="记录数" value={recordData.total} hint={hasActiveFilters ? "按当前筛选条件统计" : "全部实例"} />
         <StatCard icon={Wallet} label="余额合计" value={formatUsd(recordData.totalBalanceUsd)} hint="来自 New API 渠道余额" tone="success" />
         <StatCard icon={KeyRound} label="累计用量" value={formatUsd(recordData.totalUsedUsd)} hint="used_quota 换算为美元" tone="info" />
       </div>
 
-      <form className="toolbar" onSubmit={submitFilters}>
-        <Select
-          className="toolbar-select"
-          aria-label="按实例筛选"
-          value={instanceFilter}
-          onChange={(event) => setInstanceFilter(event.target.value)}
-        >
-          <option value="">全部实例</option>
-          {instances.map((instance) => (
-            <option key={instance.id} value={instance.id}>{instance.name}</option>
-          ))}
-        </Select>
-        <input
-          className="input toolbar-input"
-          aria-label="渠道名称"
-          placeholder="按渠道名称筛选..."
-          value={channelNameFilter}
-          onChange={(event) => setChannelNameFilter(event.target.value)}
-        />
-        <PasswordInput
-          className="toolbar-input toolbar-input-wide"
-          aria-label="完整 Key"
-          autoComplete="off"
-          spellCheck="false"
-          placeholder="粘贴完整 Key 精确查询..."
-          value={keyFilter}
-          onChange={(event) => setKeyFilter(event.target.value)}
-        />
-        <button className="btn btn-outline" disabled={isLoading}>
-          <Search size={15} aria-hidden="true" />
-          查询
-        </button>
-        <button className="btn btn-ghost" type="button" disabled={isLoading} onClick={clearFilters}>
-          清除
-        </button>
-      </form>
+      <RecordFilterBar
+        filters={filters}
+        onFiltersChange={setFilters}
+        sort={sort}
+        onSortChange={setSort}
+        onReset={resetFilters}
+        facets={recordData.facets}
+        instances={instances}
+      />
 
       <div className="table-meta">
         <span>{message}</span>
@@ -454,7 +437,9 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
                   <td>
                     <div className="cell-stack">
                       <strong>{record.channelName}</strong>
-                      <span className="cell-muted">ID {record.newApiChannelId} · {record.group}</span>
+                      <span className="cell-muted">
+                        {CHANNEL_KIND_FILTER_LABELS[record.channelKind]} · ID {record.newApiChannelId} · {record.group}
+                      </span>
                     </div>
                   </td>
                   <td>
@@ -524,7 +509,12 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
           <EmptyState
             icon={Inbox}
             title="没有符合条件的 Key 记录"
-            description="通过实例工作区导入渠道后，记录会出现在这里。"
+            description={hasActiveFilters
+              ? "试试调整或重置筛选条件。"
+              : "通过实例工作区导入渠道后，记录会出现在这里。"}
+            action={hasActiveFilters ? (
+              <button className="btn btn-outline" type="button" onClick={resetFilters}>重置筛选</button>
+            ) : null}
           />
         ) : null}
         <Pagination

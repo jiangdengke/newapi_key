@@ -1447,3 +1447,14 @@
 - `test/validation.test.js`、`test/application-store.test.js`、`test/instance-route.test.js`：新增测试。
 - `README.md`、`docs/nextjs-usage.md`：更新模型说明。
 - 回滚方式：恢复上述文件到本轮开始前版本，并恢复升级前的 SQLite 备份；旧版本会忽略 `channel_models` 列。
+
+## 2026-10-23 - Task: 记录筛选与访问 Key 查看
+
+### What was done
+
+- 参照 New API 渠道页，为“Key 记录”和“导入记录”增加搜索（名称、渠道 ID、完整 Key）、模型筛选，实例、状态、类型、分组单选筛选（显示数量）和排序，筛选条件在服务端执行。
+- schema 升级到 9：记录新增 `channel_type`（导入时写入、同步时补全）；实例新增 `access_key_ciphertext`，访问 Key 加密保存，管理员可查看和复制；旧 Key 需重新生成一次。
+
+### Testing
+
+- `npm test`：47 项全部通过；`npm run build` 通过；Playwright 端到端 7 组检查全部通过，页面无运行时错误。

@@ -12,19 +12,23 @@ import {
   ListChecks,
   RefreshCw,
   Rocket,
-  Search,
   Wallet,
 } from "lucide-react";
 
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
 import { formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
+import RecordFilterBar, {
+  CHANNEL_KIND_FILTER_LABELS,
+  createRecordQuery,
+  DEFAULT_RECORD_SORT,
+  EMPTY_RECORD_FILTERS,
+} from "./record-filters.js";
 import {
   EmptyState,
   Field,
   PageHeader,
   Pagination,
-  PasswordInput,
   Segmented,
   Select,
   Spinner,
@@ -32,6 +36,7 @@ import {
   StatusText,
   Switch,
   TagInput,
+  useDebouncedValue,
 } from "./ui.js";
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -162,12 +167,13 @@ export default function InstanceWorkspace({
   const [isImporting, setIsImporting] = useState(false);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
   const [isAutomaticSynchronizationEnabled, setIsAutomaticSynchronizationEnabled] = useState(false);
-  const [historySearchInput, setHistorySearchInput] = useState("");
-  const [historyQuery, setHistoryQuery] = useState({
-    key: "",
-    page: 1,
-    pageSize: DEFAULT_PAGE_SIZE,
-  });
+  const [historyFilters, setHistoryFilters] = useState(EMPTY_RECORD_FILTERS);
+  const [historySort, setHistorySort] = useState(DEFAULT_RECORD_SORT);
+  const [historyQuery, setHistoryQuery] = useState(() => createRecordQuery(
+    EMPTY_RECORD_FILTERS,
+    DEFAULT_RECORD_SORT,
+    { page: 1, pageSize: DEFAULT_PAGE_SIZE },
+  ));
   const [historyData, setHistoryData] = useState({
     records: [],
     page: 1,
@@ -176,12 +182,16 @@ export default function InstanceWorkspace({
     totalPages: 1,
     totalBalanceUsd: 0,
     totalUsedUsd: 0,
+    facets: null,
   });
   const [historyMessage, setHistoryMessage] = useState("正在读取本地记录...");
   const [pageError, setPageError] = useState("");
   const synchronizationInProgressRef = useRef(false);
   const automaticSynchronizationRef = useRef(null);
   const groupRequestVersionRef = useRef(0);
+  const historyRequestVersionRef = useRef(0);
+  const debouncedHistorySearch = useDebouncedValue(historyFilters.search);
+  const debouncedHistoryModel = useDebouncedValue(historyFilters.model);
   const uniqueClaudeKeys = useMemo(
     () => normalizeKeyLines(claudeKeysText),
     [claudeKeysText],
@@ -243,6 +253,8 @@ export default function InstanceWorkspace({
   }
 
   async function loadHistory(nextQuery = historyQuery) {
+    const requestVersion = historyRequestVersionRef.current + 1;
+    historyRequestVersionRef.current = requestVersion;
     const responsePayload = await requestJson(
       `/api/instances/${instanceId}/records/query`,
       {
@@ -250,8 +262,11 @@ export default function InstanceWorkspace({
         body: JSON.stringify(nextQuery),
       },
     );
+    if (historyRequestVersionRef.current !== requestVersion) {
+      return responsePayload.data;
+    }
     setHistoryQuery({
-      key: nextQuery.key,
+      ...nextQuery,
       page: responsePayload.data.page,
       pageSize: responsePayload.data.pageSize,
     });
@@ -274,27 +289,12 @@ export default function InstanceWorkspace({
     setSelectedGroups(createDefaultSelectedGroups());
     setIsLoadingGroups(false);
     setGroupError("");
-    setHistoryQuery({ key: "", page: 1, pageSize: DEFAULT_PAGE_SIZE });
-    setHistorySearchInput("");
-    Promise.all([
-      requestJson(`/api/instances/${instanceId}/config`),
-      requestJson(`/api/instances/${instanceId}/records/query`, {
-        method: "POST",
-        body: JSON.stringify({ key: "", page: 1, pageSize: DEFAULT_PAGE_SIZE }),
-      }),
-    ]).then(([configurationPayload, historyPayload]) => {
+    requestJson(`/api/instances/${instanceId}/config`).then((configurationPayload) => {
       if (!isActive) {
         return;
       }
       setConfiguration(configurationPayload.data);
       setSelectedModels(configurationPayload.data.modelsByChannelKind);
-      setHistoryData(historyPayload.data);
-      setHistoryMessage(
-        `共 ${historyPayload.data.total} 条本地记录，余额 `
-        + formatUsd(historyPayload.data.totalBalanceUsd)
-        + "，累计用量 "
-        + formatUsd(historyPayload.data.totalUsedUsd),
-      );
     }).catch((error) => {
       if (isActive) {
         const errorMessage = error?.message || "读取实例失败";
@@ -306,6 +306,32 @@ export default function InstanceWorkspace({
       isActive = false;
     };
   }, [instanceId]);
+
+  useEffect(() => {
+    loadHistory(createRecordQuery(
+      { ...historyFilters, search: debouncedHistorySearch, model: debouncedHistoryModel },
+      historySort,
+      { page: 1, pageSize: historyQuery.pageSize },
+    )).catch((error) => {
+      const errorMessage = `读取历史记录失败：${error?.message || "未知错误"}`;
+      setHistoryMessage(errorMessage);
+      showToast(errorMessage, { type: "error" });
+    });
+  }, [
+    instanceId,
+    debouncedHistorySearch,
+    debouncedHistoryModel,
+    historyFilters.statusLabel,
+    historyFilters.channelKind,
+    historyFilters.group,
+    historySort.field,
+    historySort.order,
+  ]);
+
+  function resetHistoryFilters() {
+    setHistoryFilters(EMPTY_RECORD_FILTERS);
+    setHistorySort(DEFAULT_RECORD_SORT);
+  }
 
   const configuredInstanceId = configuration?.instance.id;
 
@@ -485,38 +511,6 @@ export default function InstanceWorkspace({
     }
   }
 
-  async function submitHistorySearch(event) {
-    event.preventDefault();
-    try {
-      const loadedHistoryData = await loadHistory({
-        key: historySearchInput.trim(),
-        page: 1,
-        pageSize: historyQuery.pageSize,
-      });
-      showToast(`查询完成，共找到 ${loadedHistoryData.total} 条记录`, { type: "success" });
-    } catch (error) {
-      const errorMessage = `查询失败：${error?.message || "未知错误"}`;
-      setHistoryMessage(errorMessage);
-      showToast(errorMessage, { type: "error" });
-    }
-  }
-
-  async function clearHistorySearch() {
-    setHistorySearchInput("");
-    try {
-      await loadHistory({
-        key: "",
-        page: 1,
-        pageSize: historyQuery.pageSize,
-      });
-      showToast("已清除 Key 查询条件", { type: "info" });
-    } catch (error) {
-      const errorMessage = `读取历史记录失败：${error?.message || "未知错误"}`;
-      setHistoryMessage(errorMessage);
-      showToast(errorMessage, { type: "error" });
-    }
-  }
-
   async function changeHistoryPage(nextPage) {
     try {
       await loadHistory({ ...historyQuery, page: nextPage });
@@ -648,6 +642,7 @@ export default function InstanceWorkspace({
   );
   const selectedChannelModels = selectedModels[selectedChannelKind] ?? [];
   const configuredChannelModels = configuration.modelsByChannelKind[selectedChannelKind] ?? [];
+  const hasActiveHistoryFilters = Object.values(historyFilters).some(Boolean);
   const progressPercentage = progress.total > 0
     ? Math.round((progress.completed / progress.total) * 100)
     : 0;
@@ -838,27 +833,22 @@ export default function InstanceWorkspace({
       ) : (
         <>
           <div className="stat-grid">
-            <StatCard icon={ListChecks} label="已导入渠道" value={historyData.total} hint={historyQuery.key ? "按当前 Key 查询统计" : "通过本工具导入的渠道"} />
+            <StatCard icon={ListChecks} label="已导入渠道" value={historyData.total} hint={hasActiveHistoryFilters ? "按当前筛选条件统计" : "通过本工具导入的渠道"} />
             <StatCard icon={Wallet} label="余额合计" value={formatUsd(historyData.totalBalanceUsd)} hint="来自 New API 渠道余额" tone="success" />
             <StatCard icon={KeyRound} label="累计用量" value={formatUsd(historyData.totalUsedUsd)} hint="used_quota 换算为美元" tone="info" />
           </div>
 
-          <div className="toolbar-row">
-            <form className="toolbar" autoComplete="off" onSubmit={submitHistorySearch}>
-              <PasswordInput
-                className="toolbar-input toolbar-input-wide"
-                aria-label="完整 Key"
-                placeholder="粘贴完整 Key 精确查询..."
-                spellCheck="false"
-                value={historySearchInput}
-                onChange={(event) => setHistorySearchInput(event.target.value)}
-              />
-              <button className="btn btn-outline">
-                <Search size={15} aria-hidden="true" />
-                查询
-              </button>
-              <button className="btn btn-ghost" type="button" onClick={clearHistorySearch}>清除</button>
-            </form>
+          <RecordFilterBar
+            filters={historyFilters}
+            onFiltersChange={setHistoryFilters}
+            sort={historySort}
+            onSortChange={setHistorySort}
+            onReset={resetHistoryFilters}
+            facets={historyData.facets}
+          />
+
+          <div className="table-meta" aria-live="polite">
+            <span>{historyMessage}</span>
             <div className="toolbar-actions">
               <Switch
                 checked={isAutomaticSynchronizationEnabled}
@@ -877,8 +867,6 @@ export default function InstanceWorkspace({
               </button>
             </div>
           </div>
-
-          <div className="table-meta" aria-live="polite"><span>{historyMessage}</span></div>
 
           <div className="table-card">
             <div className="table-scroll">
@@ -900,7 +888,9 @@ export default function InstanceWorkspace({
                       <td>
                         <div className="cell-stack">
                           <strong>{record.channelName}</strong>
-                          <span className="cell-muted">ID {record.newApiChannelId} · {record.group}</span>
+                          <span className="cell-muted">
+                            {CHANNEL_KIND_FILTER_LABELS[record.channelKind]} · ID {record.newApiChannelId} · {record.group}
+                          </span>
                         </div>
                       </td>
                       <td><span className="cell-mono">{record.keyMask}</span></td>
@@ -917,14 +907,18 @@ export default function InstanceWorkspace({
             {historyData.records.length === 0 ? (
               <EmptyState
                 icon={Inbox}
-                title={historyQuery.key ? "没有找到该 Key 对应的渠道" : "暂时没有导入记录"}
-                description={historyQuery.key ? "请确认粘贴的是完整 Key。" : "在“渠道导入”中提交 Key 后，渠道会出现在这里。"}
-                action={!historyQuery.key ? (
+                title={hasActiveHistoryFilters ? "没有符合条件的记录" : "暂时没有导入记录"}
+                description={hasActiveHistoryFilters
+                  ? "试试调整或重置筛选条件；按 Key 查询时请粘贴完整 Key。"
+                  : "在“渠道导入”中提交 Key 后，渠道会出现在这里。"}
+                action={hasActiveHistoryFilters ? (
+                  <button className="btn btn-outline" type="button" onClick={resetHistoryFilters}>重置筛选</button>
+                ) : (
                   <button className="btn btn-outline" type="button" onClick={() => onViewChange("import")}>
                     <FileInput size={15} aria-hidden="true" />
                     去导入渠道
                   </button>
-                ) : null}
+                )}
               />
             ) : null}
             <Pagination

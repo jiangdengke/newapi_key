@@ -292,7 +292,7 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
     assert.equal(store.getInstance(placeholderInstance.id).id, placeholderInstance.id);
     assert.equal(store.deleteInstance(configuredInstance.id), null);
 
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 8);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 9);
     assert.deepEqual(store.database.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(store.database.prepare(`
       SELECT COUNT(*) AS total FROM users WHERE role = 'user'
@@ -381,7 +381,7 @@ test("ApplicationStore disables legacy Admin Hub instances and drops protocol co
     assert.equal(columnNames.includes("connection_protocol"), false);
     assert.equal(columnNames.includes("admin_hub_target_site_id"), false);
     assert.equal("connectionProtocol" in store.getInstance(standardInstance.id), false);
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 8);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 9);
   } finally {
     store.close();
     rmSync(temporaryDirectory, { recursive: true, force: true });

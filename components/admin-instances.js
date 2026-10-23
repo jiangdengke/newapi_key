@@ -6,6 +6,8 @@ import {
   Ban,
   Boxes,
   Copy,
+  Eye,
+  EyeOff,
   KeyRound,
   Link2,
   ListChecks,
@@ -235,6 +237,8 @@ export default function AdminInstances({
   const [pendingAccessKeyAction, setPendingAccessKeyAction] = useState(null);
   const [isUpdatingAccessKey, setIsUpdatingAccessKey] = useState(false);
   const [generatedAccess, setGeneratedAccess] = useState(null);
+  const [revealedAccessKeys, setRevealedAccessKeys] = useState({});
+  const [loadingAccessKeyInstanceId, setLoadingAccessKeyInstanceId] = useState(null);
   const [testingInstanceId, setTestingInstanceId] = useState(null);
 
   const enabledInstanceCount = instances.filter((instance) => instance.enabled).length;
@@ -342,6 +346,7 @@ export default function AdminInstances({
         { method: "POST", body: "{}" },
       );
       setPendingAccessKeyAction(null);
+      forgetRevealedAccessKey(instance.id);
       setGeneratedAccess({ instance, accessKey: responsePayload.data.accessKey });
       await onReload();
     } catch (error) {
@@ -359,12 +364,63 @@ export default function AdminInstances({
         body: "{}",
       });
       setPendingAccessKeyAction(null);
+      forgetRevealedAccessKey(instance.id);
       showToast("实例访问 Key 已停用", { type: "success" });
       await onReload();
     } catch (error) {
       showToast(error?.message || "停用访问 Key 失败", { type: "error" });
     } finally {
       setIsUpdatingAccessKey(false);
+    }
+  }
+
+  function forgetRevealedAccessKey(instanceId) {
+    setRevealedAccessKeys((currentKeys) => {
+      const remainingKeys = { ...currentKeys };
+      delete remainingKeys[instanceId];
+      return remainingKeys;
+    });
+  }
+
+  async function loadAccessKey(instance) {
+    if (revealedAccessKeys[instance.id]) {
+      return revealedAccessKeys[instance.id];
+    }
+    setLoadingAccessKeyInstanceId(instance.id);
+    try {
+      const responsePayload = await requestJson(
+        `/api/admin/instances/${instance.id}/access-key/reveal`,
+        { method: "POST", body: "{}" },
+      );
+      const accessKey = responsePayload.data.accessKey;
+      setRevealedAccessKeys((currentKeys) => ({ ...currentKeys, [instance.id]: accessKey }));
+      return accessKey;
+    } catch (error) {
+      showToast(error?.message || "读取访问 Key 失败", { type: "error" });
+      return null;
+    } finally {
+      setLoadingAccessKeyInstanceId(null);
+    }
+  }
+
+  function toggleAccessKeyVisibility(instance) {
+    if (revealedAccessKeys[instance.id]) {
+      forgetRevealedAccessKey(instance.id);
+      return;
+    }
+    loadAccessKey(instance);
+  }
+
+  async function copyAccessKey(instance) {
+    const accessKey = await loadAccessKey(instance);
+    if (!accessKey) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(accessKey);
+      showToast("完整访问 Key 已复制", { type: "success" });
+    } catch {
+      showToast("复制访问 Key 失败，请检查浏览器权限", { type: "error" });
     }
   }
 
@@ -442,7 +498,42 @@ export default function AdminInstances({
                   <td>{instance.priority} / {instance.weight}</td>
                   <td>
                     {instance.accessKey.enabled ? (
-                      <span className="cell-mono">{instance.accessKey.mask}</span>
+                      <div className="key-cell">
+                        <span className="cell-mono key-value">
+                          {revealedAccessKeys[instance.id] || instance.accessKey.mask}
+                        </span>
+                        {instance.accessKey.revealable ? (
+                          <>
+                            <button
+                              className="btn btn-ghost btn-icon btn-xs"
+                              type="button"
+                              title={revealedAccessKeys[instance.id] ? "隐藏访问 Key" : "显示访问 Key"}
+                              aria-label={revealedAccessKeys[instance.id] ? "隐藏访问 Key" : "显示访问 Key"}
+                              disabled={loadingAccessKeyInstanceId === instance.id}
+                              onClick={() => toggleAccessKeyVisibility(instance)}
+                            >
+                              {revealedAccessKeys[instance.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-icon btn-xs"
+                              type="button"
+                              title="复制访问 Key"
+                              aria-label="复制访问 Key"
+                              disabled={loadingAccessKeyInstanceId === instance.id}
+                              onClick={() => copyAccessKey(instance)}
+                            >
+                              <Copy size={14} />
+                            </button>
+                          </>
+                        ) : (
+                          <span
+                            className="tag tag-muted"
+                            title="该访问 Key 生成于加密保存之前，重新生成一次后即可随时查看"
+                          >
+                            重新生成后可查看
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <span className="tag tag-muted">
                         {instance.accessKey.configured ? "已停用" : "未生成"}
@@ -586,7 +677,7 @@ export default function AdminInstances({
         footer={(
           <>
             <button className="btn btn-outline" type="button" onClick={() => setGeneratedAccess(null)}>
-              我已保存
+              完成
             </button>
             <button className="btn btn-primary" type="button" onClick={copyGeneratedAccessKey}>
               <Copy size={15} aria-hidden="true" />
@@ -599,8 +690,8 @@ export default function AdminInstances({
           <ShieldCheck size={16} aria-hidden="true" />
           <code>{generatedAccess?.accessKey}</code>
         </div>
-        <p className="callout callout-warning">
-          完整访问 Key 只显示这一次。关闭窗口或刷新页面后无法再次查看，请立即复制保存。
+        <p className="callout callout-info">
+          访问 Key 已加密保存，之后可以在实例列表中随时查看或复制。旧 Key 和现有访客会话已失效，请把新 Key 发给访问者。
         </p>
       </Modal>
     </div>

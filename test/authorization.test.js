@@ -3,11 +3,13 @@ import test from "node:test";
 
 import { DELETE as deleteAdminInstance } from "../app/api/admin/instances/[instanceId]/route.js";
 import { GET as getAdminInstances } from "../app/api/admin/instances/route.js";
+import { POST as revealInstanceAccessKey } from "../app/api/admin/instances/[instanceId]/access-key/reveal/route.js";
 import { DELETE as deleteAdministratorRecords } from "../app/api/admin/records/route.js";
 import { POST as queryAdministratorRecords } from "../app/api/admin/records/query/route.js";
 import { POST as revealAdministratorRecordKey } from "../app/api/admin/records/[recordId]/key/route.js";
 import { POST as loginWithAccessKey } from "../app/api/access/login/route.js";
 import { GET as getInstanceConfiguration } from "../app/api/instances/[instanceId]/config/route.js";
+import { POST as queryInstanceRecords } from "../app/api/instances/[instanceId]/records/query/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
 import { SESSION_COOKIE_NAME } from "../lib/http.js";
 
@@ -641,6 +643,178 @@ test("only administrators can reveal complete imported keys", async () => {
     assert.equal(legacyResponse.status, 409);
   } finally {
     restoreRuntimeContext();
+    store.close();
+  }
+});
+
+function recordChannel(store, instanceId, baseUrl, channel, key) {
+  store.recordImportedChannel({
+    instanceId,
+    baseUrl,
+    key,
+    quotaPerUnit: 500_000,
+    channel: { status: 1, used_quota: 0, models: "claude-opus-4-8", group: "anthropic", ...channel },
+  });
+}
+
+test("record queries filter, sort and count facets within the caller's scope", async () => {
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 9),
+    initialInstance: null,
+    bootstrapAdmin: { username: "system-administrator", password: ADMINISTRATOR_PASSWORD },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+
+  try {
+    const firstInstance = store.createInstance(createInstanceInput("first", "https://first.example.com"));
+    const secondInstance = store.createInstance(createInstanceInput("second", "https://second.example.com"));
+    recordChannel(store, firstInstance.id, firstInstance.baseUrl, { id: 11, name: "claude-001", type: 14, used_quota: 500_000 }, "sk-ant-first-0001");
+    recordChannel(store, firstInstance.id, firstInstance.baseUrl, { id: 12, name: "claude-002", type: 14, status: 2, group: "vip", used_quota: 2_000_000 }, "sk-ant-first-0002");
+    recordChannel(store, firstInstance.id, firstInstance.baseUrl, { id: 13, name: "openai-001", type: 1, models: "gpt-5.6-sol" }, "sk-proj-first-0003");
+    recordChannel(store, firstInstance.id, firstInstance.baseUrl, { id: 14, name: "legacy-001" }, "sk-legacy-first-0004");
+    recordChannel(store, secondInstance.id, secondInstance.baseUrl, { id: 21, name: "claude-001", type: 14 }, "sk-ant-second-0001");
+
+    const query = (options) => store.queryRecords({ instanceId: firstInstance.id, ...options });
+    const names = (result) => result.records.map((record) => record.channelName);
+    assert.deepEqual(names(query({ search: "claude" })).sort(), ["claude-001", "claude-002"]);
+    assert.deepEqual(names(query({ search: "13" })), ["openai-001"]);
+    assert.deepEqual(names(query({ search: "sk-ant-first-0002" })), ["claude-002"]);
+    assert.deepEqual(names(query({ search: "sk-ant-first" })), []);
+    assert.deepEqual(names(query({ model: "gpt-5" })), ["openai-001"]);
+    assert.deepEqual(names(query({ statusLabel: "disabled" })), ["claude-002"]);
+    assert.deepEqual(names(query({ channelKind: "openai" })), ["openai-001"]);
+    assert.deepEqual(names(query({ channelKind: "unknown" })), ["legacy-001"]);
+    assert.deepEqual(names(query({ group: "vip" })), ["claude-002"]);
+    assert.deepEqual(names(query({ sort: "usedUsd", order: "desc" })).slice(0, 2), ["claude-002", "claude-001"]);
+    assert.deepEqual(names(query({ sort: "channelName", order: "asc" })), ["claude-001", "claude-002", "legacy-001", "openai-001"]);
+
+    const facets = query({ statusLabel: "disabled" }).facets;
+    assert.deepEqual(
+      Object.fromEntries(facets.channelKinds.map(({ value, count }) => [value, count])),
+      { claude: 2, openai: 1, unknown: 1 },
+    );
+    assert.deepEqual(facets.groups, [{ value: "anthropic", count: 3 }, { value: "vip", count: 1 }]);
+    assert.equal(facets.instances, undefined);
+    const administratorFacets = store.queryAdministratorRecords({}).facets;
+    assert.deepEqual(administratorFacets.instances.sort((first, second) => first.value - second.value), [
+      { value: firstInstance.id, count: 4 },
+      { value: secondInstance.id, count: 1 },
+    ]);
+
+    const visitorSession = store.createVisitorSessionForAccessKey(
+      store.regenerateInstanceAccessKey(firstInstance.id).accessKey,
+    );
+    const visitorResponse = await queryInstanceRecords(
+      createAuthenticatedPostRequest(`/api/instances/${firstInstance.id}/records/query`, visitorSession.token, {
+        search: "claude-001",
+      }),
+      createRouteContext(firstInstance.id),
+    );
+    const visitorPayload = await visitorResponse.json();
+    assert.equal(visitorResponse.status, 200);
+    assert.deepEqual(visitorPayload.data.records.map((record) => record.newApiChannelId), [11]);
+    assert.equal(visitorPayload.data.records[0].channelKind, "claude");
+
+    const invalidResponse = await queryInstanceRecords(
+      createAuthenticatedPostRequest(`/api/instances/${firstInstance.id}/records/query`, visitorSession.token, {
+        statusLabel: "deleted",
+      }),
+      createRouteContext(firstInstance.id),
+    );
+    assert.equal(invalidResponse.status, 400);
+    assert.equal((await invalidResponse.json()).message, "状态筛选条件无效");
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+  }
+});
+
+test("only administrators can reveal an encrypted instance access key", async () => {
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 10),
+    initialInstance: null,
+    bootstrapAdmin: { username: "system-administrator", password: ADMINISTRATOR_PASSWORD },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+
+  try {
+    const instance = store.createInstance(createInstanceInput("first", "https://first.example.com"));
+    const administrator = store.authenticateAdministrator("system-administrator", ADMINISTRATOR_PASSWORD);
+    const administratorSession = store.createAdministratorSession(administrator.id);
+    const revealPath = `/api/admin/instances/${instance.id}/access-key/reveal`;
+
+    const missingResponse = await revealInstanceAccessKey(
+      createAuthenticatedPostRequest(revealPath, administratorSession.token, {}),
+      createRouteContext(instance.id),
+    );
+    assert.equal(missingResponse.status, 409);
+
+    const { accessKey } = store.regenerateInstanceAccessKey(instance.id);
+    assert.equal(store.getInstance(instance.id).accessKey.revealable, true);
+    const visitorSession = store.createVisitorSessionForAccessKey(accessKey);
+
+    const anonymousResponse = await revealInstanceAccessKey(
+      new Request(`http://localhost${revealPath}`, { method: "POST", headers: { Host: "localhost" } }),
+      createRouteContext(instance.id),
+    );
+    assert.equal(anonymousResponse.status, 401);
+    const visitorResponse = await revealInstanceAccessKey(
+      createAuthenticatedPostRequest(revealPath, visitorSession.token, {}),
+      createRouteContext(instance.id),
+    );
+    assert.equal(visitorResponse.status, 403);
+
+    const administratorResponse = await revealInstanceAccessKey(
+      createAuthenticatedPostRequest(revealPath, administratorSession.token, {}),
+      createRouteContext(instance.id),
+    );
+    assert.equal(administratorResponse.status, 200);
+    assert.equal((await administratorResponse.json()).data.accessKey, accessKey);
+
+    store.database.prepare("UPDATE new_api_instances SET access_key_ciphertext = NULL WHERE id = ?").run(instance.id);
+    assert.equal(store.getInstance(instance.id).accessKey.revealable, false);
+
+    store.disableInstanceAccessKey(instance.id);
+    assert.equal(store.getInstanceAccessKey(instance.id).accessKey, null);
+    assert.equal(
+      store.database.prepare("SELECT access_key_ciphertext FROM new_api_instances WHERE id = ?").get(instance.id).access_key_ciphertext,
+      null,
+    );
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+  }
+});
+
+test("synchronization fills in the channel type of older records", () => {
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 11),
+    initialInstance: null,
+    bootstrapAdmin: { username: "system-administrator", password: ADMINISTRATOR_PASSWORD },
+  });
+
+  try {
+    const instance = store.createInstance(createInstanceInput("first", "https://first.example.com"));
+    recordChannel(store, instance.id, instance.baseUrl, { id: 31, name: "legacy-001" }, "sk-legacy-0001");
+    assert.equal(store.listRecords(instance.id)[0].channelKind, "unknown");
+
+    store.synchronizeChannels({
+      instanceId: instance.id,
+      channels: [{ id: 31, name: "legacy-001", type: 48, status: 1, used_quota: 0, models: "grok-4.5", group: "xai" }],
+      quotaPerUnit: 500_000,
+    });
+    assert.equal(store.listRecords(instance.id)[0].channelKind, "grok");
+
+    store.synchronizeChannels({
+      instanceId: instance.id,
+      channels: [{ id: 31, name: "legacy-001", status: 1, used_quota: 0, models: "grok-4.5", group: "xai" }],
+      quotaPerUnit: 500_000,
+    });
+    assert.equal(store.listRecords(instance.id)[0].channelKind, "grok");
+  } finally {
     store.close();
   }
 });
