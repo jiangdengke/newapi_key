@@ -96,7 +96,7 @@ test("administrator sync route authorizes callers and skips ineligible instances
     store.createInstance(createInstanceInput("empty-instance", true));
     recordTrackedChannel(store, enabledInstance, 101);
     recordTrackedChannel(store, disabledInstance, 102);
-    const visitorAccess = store.regenerateInstanceAccessKey(enabledInstance.id);
+    const visitorAccess = store.createInstanceMember(enabledInstance.id, { name: "测试成员" });
     const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
 
     let synchronizedSearchCount = 0;
@@ -167,6 +167,7 @@ test("administrator sync route authorizes callers and skips ineligible instances
         recordId: store.listRecords(enabledInstance.id)[0].id,
         channelName: "claude-0711-101",
         keyMask: "sk-ant-****-101",
+        memberId: null,
         usedUsd: 2,
         instanceId: enabledInstance.id,
         instanceName: enabledInstance.name,

@@ -97,7 +97,7 @@ test("administrator password route rejects anonymous and visitor requests", asyn
       dateMode: "auto",
       enabled: true,
     });
-    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
     const visitorSession = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
     const visitorResponse = await changeAdministratorPassword(
       createPasswordChangeRequest(

@@ -1606,6 +1606,143 @@ p {
   color: var(--foreground);
 }
 
+.naming-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  background: var(--muted);
+  font-size: 13px;
+}
+
+.naming-hint > svg {
+  flex: none;
+}
+
+.naming-hint code {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.naming-hint-meta {
+  margin-left: auto;
+}
+
+.member-count-button {
+  margin-left: -8px;
+  color: var(--foreground);
+}
+
+.member-defaults code,
+.member-preview code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.member-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.member-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.member-card.is-disabled {
+  background: var(--muted);
+}
+
+.member-card.is-disabled .cell-stack strong {
+  color: var(--muted-foreground);
+}
+
+.member-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.member-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.member-meta dt {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.member-meta dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.member-inherited {
+  color: var(--muted-foreground);
+}
+
+.member-key {
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted-foreground);
+}
+
+.member-key > svg {
+  flex: none;
+  margin-right: 6px;
+}
+
+.member-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.member-date-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 8px;
+}
+
+.member-date-row:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.member-preview {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  font-size: 13px;
+}
+
+.member-preview > span,
+.member-preview small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+@media (max-width: 560px) {
+  .member-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .pagination {
   display: flex;
   flex-wrap: wrap;

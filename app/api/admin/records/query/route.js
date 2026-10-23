@@ -26,9 +26,14 @@ export async function POST(request) {
     if (instanceId !== null && (!Number.isSafeInteger(instanceId) || instanceId < 1)) {
       throw new HttpError(400, "实例筛选条件无效");
     }
+    const memberId = requestBody?.memberId ? Number(requestBody.memberId) : null;
+    if (memberId !== null && (!Number.isSafeInteger(memberId) || memberId < 1)) {
+      throw new HttpError(400, "成员筛选条件无效");
+    }
     const data = context.store.queryAdministratorRecords({
       ...validateRecordQueryInput(requestBody),
       instanceId,
+      memberId,
     });
     return jsonResponse({ success: true, data }, { requestId });
   } catch (error) {

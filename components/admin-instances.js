@@ -3,12 +3,7 @@
 import { useState } from "react";
 import {
   ArrowRight,
-  Ban,
   Boxes,
-  Copy,
-  Eye,
-  EyeOff,
-  KeyRound,
   Link2,
   ListChecks,
   Pencil,
@@ -18,19 +13,20 @@ import {
   RefreshCw,
   Server,
   Settings2,
-  ShieldCheck,
   Trash2,
+  Users,
 } from "lucide-react";
 
 import { requestJson } from "../lib/client-api.js";
+import { formatChannelNamePattern } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
 import { CHANNEL_KIND_LABELS, DEFAULT_CHANNEL_MODELS } from "../lib/validation.js";
+import InstanceMembersSheet from "./admin-members.js";
 import {
   ConfirmDialog,
   DropdownMenu,
   EmptyState,
   Field,
-  Modal,
   PageHeader,
   PasswordInput,
   SectionHeading,
@@ -89,13 +85,6 @@ function createInstanceRequestBody(instanceForm) {
   };
 }
 
-function formatChannelNamePattern(instance) {
-  const dateSegment = instance.dateMode === "auto"
-    ? "-MMDD"
-    : instance.dateMode ? `-${instance.dateMode}` : "";
-  return `${instance.namePrefix}${dateSegment}-${String(instance.startNumber).padStart(3, "0")}`;
-}
-
 function InstanceFormFields({ instanceForm, onChange, isEditing }) {
   return (
     <>
@@ -129,11 +118,11 @@ function InstanceFormFields({ instanceForm, onChange, isEditing }) {
         <SectionHeading
           icon={Settings2}
           title="渠道默认值"
-          description="应用到之后通过该实例新建的每个渠道。"
+          description="应用到之后通过该实例新建的每个渠道；访问成员可单独覆盖名称前缀、日期、序号、优先级和权重。"
           tone="success"
         />
         <div className="form-grid">
-          <Field label="名称前缀">
+          <Field label="名称前缀" hint="新增成员时的参考值，实际导入使用成员自己的前缀。">
             <input className="input" value={instanceForm.namePrefix} onChange={(event) => onChange("namePrefix", event.target.value)} required />
           </Field>
           <Field label="起始序号">
@@ -234,15 +223,12 @@ export default function AdminInstances({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingInstance, setDeletingInstance] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [pendingAccessKeyAction, setPendingAccessKeyAction] = useState(null);
-  const [isUpdatingAccessKey, setIsUpdatingAccessKey] = useState(false);
-  const [generatedAccess, setGeneratedAccess] = useState(null);
-  const [revealedAccessKeys, setRevealedAccessKeys] = useState({});
-  const [loadingAccessKeyInstanceId, setLoadingAccessKeyInstanceId] = useState(null);
+  const [membersInstanceId, setMembersInstanceId] = useState(null);
   const [testingInstanceId, setTestingInstanceId] = useState(null);
 
   const enabledInstanceCount = instances.filter((instance) => instance.enabled).length;
-  const activeAccessKeyCount = instances.filter((instance) => instance.accessKey.enabled).length;
+  const activeMemberCount = instances.reduce((total, instance) => total + instance.activeMemberCount, 0);
+  const membersInstance = instances.find((instance) => instance.id === membersInstanceId) ?? null;
   const channelRecordCount = instances.reduce(
     (total, instance) => total + instance.channelRecordCount,
     0,
@@ -338,114 +324,11 @@ export default function AdminInstances({
     }
   }
 
-  async function generateAccessKey(instance) {
-    setIsUpdatingAccessKey(true);
-    try {
-      const responsePayload = await requestJson(
-        `/api/admin/instances/${instance.id}/access-key`,
-        { method: "POST", body: "{}" },
-      );
-      setPendingAccessKeyAction(null);
-      forgetRevealedAccessKey(instance.id);
-      setGeneratedAccess({ instance, accessKey: responsePayload.data.accessKey });
-      await onReload();
-    } catch (error) {
-      showToast(error?.message || "生成访问 Key 失败", { type: "error" });
-    } finally {
-      setIsUpdatingAccessKey(false);
-    }
-  }
-
-  async function disableAccessKey(instance) {
-    setIsUpdatingAccessKey(true);
-    try {
-      await requestJson(`/api/admin/instances/${instance.id}/access-key`, {
-        method: "DELETE",
-        body: "{}",
-      });
-      setPendingAccessKeyAction(null);
-      forgetRevealedAccessKey(instance.id);
-      showToast("实例访问 Key 已停用", { type: "success" });
-      await onReload();
-    } catch (error) {
-      showToast(error?.message || "停用访问 Key 失败", { type: "error" });
-    } finally {
-      setIsUpdatingAccessKey(false);
-    }
-  }
-
-  function forgetRevealedAccessKey(instanceId) {
-    setRevealedAccessKeys((currentKeys) => {
-      const remainingKeys = { ...currentKeys };
-      delete remainingKeys[instanceId];
-      return remainingKeys;
-    });
-  }
-
-  async function loadAccessKey(instance) {
-    if (revealedAccessKeys[instance.id]) {
-      return revealedAccessKeys[instance.id];
-    }
-    setLoadingAccessKeyInstanceId(instance.id);
-    try {
-      const responsePayload = await requestJson(
-        `/api/admin/instances/${instance.id}/access-key/reveal`,
-        { method: "POST", body: "{}" },
-      );
-      const accessKey = responsePayload.data.accessKey;
-      setRevealedAccessKeys((currentKeys) => ({ ...currentKeys, [instance.id]: accessKey }));
-      return accessKey;
-    } catch (error) {
-      showToast(error?.message || "读取访问 Key 失败", { type: "error" });
-      return null;
-    } finally {
-      setLoadingAccessKeyInstanceId(null);
-    }
-  }
-
-  function toggleAccessKeyVisibility(instance) {
-    if (revealedAccessKeys[instance.id]) {
-      forgetRevealedAccessKey(instance.id);
-      return;
-    }
-    loadAccessKey(instance);
-  }
-
-  async function copyAccessKey(instance) {
-    const accessKey = await loadAccessKey(instance);
-    if (!accessKey) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(accessKey);
-      showToast("完整访问 Key 已复制", { type: "success" });
-    } catch {
-      showToast("复制访问 Key 失败，请检查浏览器权限", { type: "error" });
-    }
-  }
-
-  function requestAccessKeyGeneration(instance) {
-    if (instance.accessKey.configured) {
-      setPendingAccessKeyAction({ type: "regenerate", instance });
-      return;
-    }
-    generateAccessKey(instance);
-  }
-
-  async function copyGeneratedAccessKey() {
-    try {
-      await navigator.clipboard.writeText(generatedAccess.accessKey);
-      showToast("完整访问 Key 已复制", { type: "success" });
-    } catch (error) {
-      showToast(error?.message || "复制访问 Key 失败", { type: "error" });
-    }
-  }
-
   return (
     <div className="page">
       <PageHeader
         title="实例管理"
-        description="维护 New API 实例的连接信息、渠道默认值和访问 Key。"
+        description="维护 New API 实例的连接信息、渠道默认值和访问成员。"
         actions={(
           <>
             <button className="btn btn-outline" type="button" disabled={isLoading} onClick={onReload}>
@@ -462,7 +345,7 @@ export default function AdminInstances({
 
       <div className="stat-grid">
         <StatCard icon={Server} label="实例总数" value={instances.length} hint={`已启用 ${enabledInstanceCount} 个`} />
-        <StatCard icon={KeyRound} label="生效的访问 Key" value={activeAccessKeyCount} hint="访问者凭 Key 进入对应实例" tone="success" />
+        <StatCard icon={Users} label="访问成员" value={activeMemberCount} hint="已启用的成员，各自凭 Key 进入实例" tone="success" />
         <StatCard icon={ListChecks} label="本地渠道记录" value={channelRecordCount} hint="通过本工具导入的渠道" tone="info" />
       </div>
 
@@ -474,9 +357,9 @@ export default function AdminInstances({
                 <th>实例</th>
                 <th>状态</th>
                 <th>管理员</th>
-                <th>渠道命名</th>
+                <th>默认命名</th>
                 <th>优先级 / 权重</th>
-                <th>访问 Key</th>
+                <th>访问成员</th>
                 <th className="align-right">记录</th>
                 <th className="align-right">操作</th>
               </tr>
@@ -497,48 +380,19 @@ export default function AdminInstances({
                   <td><span className="cell-mono">{formatChannelNamePattern(instance)}</span></td>
                   <td>{instance.priority} / {instance.weight}</td>
                   <td>
-                    {instance.accessKey.enabled ? (
-                      <div className="key-cell">
-                        <span className="cell-mono key-value">
-                          {revealedAccessKeys[instance.id] || instance.accessKey.mask}
-                        </span>
-                        {instance.accessKey.revealable ? (
-                          <>
-                            <button
-                              className="btn btn-ghost btn-icon btn-xs"
-                              type="button"
-                              title={revealedAccessKeys[instance.id] ? "隐藏访问 Key" : "显示访问 Key"}
-                              aria-label={revealedAccessKeys[instance.id] ? "隐藏访问 Key" : "显示访问 Key"}
-                              disabled={loadingAccessKeyInstanceId === instance.id}
-                              onClick={() => toggleAccessKeyVisibility(instance)}
-                            >
-                              {revealedAccessKeys[instance.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-icon btn-xs"
-                              type="button"
-                              title="复制访问 Key"
-                              aria-label="复制访问 Key"
-                              disabled={loadingAccessKeyInstanceId === instance.id}
-                              onClick={() => copyAccessKey(instance)}
-                            >
-                              <Copy size={14} />
-                            </button>
-                          </>
-                        ) : (
-                          <span
-                            className="tag tag-muted"
-                            title="该访问 Key 生成于加密保存之前，重新生成一次后即可随时查看"
-                          >
-                            重新生成后可查看
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="tag tag-muted">
-                        {instance.accessKey.configured ? "已停用" : "未生成"}
-                      </span>
-                    )}
+                    <button
+                      className="btn btn-ghost btn-sm member-count-button"
+                      type="button"
+                      aria-label={`管理 ${instance.name} 的访问成员`}
+                      onClick={() => setMembersInstanceId(instance.id)}
+                    >
+                      <Users size={14} aria-hidden="true" />
+                      {instance.memberCount === 0
+                        ? "添加成员"
+                        : instance.activeMemberCount === instance.memberCount
+                          ? `${instance.memberCount} 人`
+                          : `${instance.activeMemberCount} / ${instance.memberCount} 人`}
+                    </button>
                   </td>
                   <td className="align-right">{instance.channelRecordCount}</td>
                   <td className="align-right">
@@ -560,15 +414,10 @@ export default function AdminInstances({
                             onSelect: () => testInstance(instance.id),
                           },
                           {
-                            label: instance.accessKey.configured ? "重新生成访问 Key" : "生成访问 Key",
-                            icon: KeyRound,
-                            onSelect: () => requestAccessKeyGeneration(instance),
+                            label: "管理访问成员",
+                            icon: Users,
+                            onSelect: () => setMembersInstanceId(instance.id),
                           },
-                          instance.accessKey.enabled ? {
-                            label: "停用访问 Key",
-                            icon: Ban,
-                            onSelect: () => setPendingAccessKeyAction({ type: "disable", instance }),
-                          } : null,
                           {
                             label: "删除实例",
                             icon: Trash2,
@@ -588,7 +437,7 @@ export default function AdminInstances({
           <EmptyState
             icon={Boxes}
             title="尚未配置实例"
-            description="添加第一个 New API 实例后，即可为它生成访问 Key 并导入渠道。"
+            description="添加第一个 New API 实例后，即可为它添加访问成员并导入渠道。"
             action={(
               <button className="btn btn-primary" type="button" onClick={openCreateSheet}>
                 <Plus size={15} aria-hidden="true" />
@@ -639,7 +488,7 @@ export default function AdminInstances({
         onCancel={() => setDeletingInstance(null)}
       >
         <p>
-          将删除本系统中的实例“{deletingInstance?.name}”、访问 Key、访客会话和
+          将删除本系统中的实例“{deletingInstance?.name}”、{deletingInstance?.memberCount} 个访问成员、访客会话和
           {" "}{deletingInstance?.channelRecordCount} 条本地渠道历史。
         </p>
         <p className="callout callout-warning">
@@ -647,53 +496,11 @@ export default function AdminInstances({
         </p>
       </ConfirmDialog>
 
-      <ConfirmDialog
-        open={Boolean(pendingAccessKeyAction)}
-        title={pendingAccessKeyAction?.type === "disable" ? "停用访问 Key？" : "重新生成访问 Key？"}
-        confirmLabel={pendingAccessKeyAction?.type === "disable" ? "确认停用" : "确认重新生成"}
-        tone={pendingAccessKeyAction?.type === "disable" ? "danger" : "primary"}
-        isBusy={isUpdatingAccessKey}
-        onConfirm={() => (
-          pendingAccessKeyAction.type === "disable"
-            ? disableAccessKey(pendingAccessKeyAction.instance)
-            : generateAccessKey(pendingAccessKeyAction.instance)
-        )}
-        onCancel={() => setPendingAccessKeyAction(null)}
-      >
-        <p>
-          {pendingAccessKeyAction?.type === "disable"
-            ? `停用后，“${pendingAccessKeyAction?.instance.name}”的访问 Key 和现有访客会话将立即失效。`
-            : `重新生成后，“${pendingAccessKeyAction?.instance.name}”的旧访问 Key 和现有访客会话将立即失效。`}
-        </p>
-      </ConfirmDialog>
-
-      <Modal
-        open={Boolean(generatedAccess)}
-        title="访问 Key 已生成"
-        description={generatedAccess ? `实例：${generatedAccess.instance.name}` : undefined}
-        size="sm"
-        closeOnBackdrop={false}
-        onClose={() => setGeneratedAccess(null)}
-        footer={(
-          <>
-            <button className="btn btn-outline" type="button" onClick={() => setGeneratedAccess(null)}>
-              完成
-            </button>
-            <button className="btn btn-primary" type="button" onClick={copyGeneratedAccessKey}>
-              <Copy size={15} aria-hidden="true" />
-              复制 Key
-            </button>
-          </>
-        )}
-      >
-        <div className="secret-box">
-          <ShieldCheck size={16} aria-hidden="true" />
-          <code>{generatedAccess?.accessKey}</code>
-        </div>
-        <p className="callout callout-info">
-          访问 Key 已加密保存，之后可以在实例列表中随时查看或复制。旧 Key 和现有访客会话已失效，请把新 Key 发给访问者。
-        </p>
-      </Modal>
+      <InstanceMembersSheet
+        instance={membersInstance}
+        onClose={() => setMembersInstanceId(null)}
+        onChanged={onReload}
+      />
     </div>
   );
 }

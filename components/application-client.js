@@ -220,7 +220,12 @@ export default function ApplicationClient() {
     : route.page === "workspace" ? `instance:${route.instanceId}` : route.page;
   const shellUser = currentPrincipal.kind === "admin"
     ? { name: currentPrincipal.username, initial: currentPrincipal.username.slice(0, 1).toUpperCase() }
-    : { name: currentPrincipal.instanceName, initial: currentPrincipal.instanceName.slice(0, 1).toUpperCase() };
+    : {
+      name: currentPrincipal.memberName
+        ? `${currentPrincipal.memberName} · ${currentPrincipal.instanceName}`
+        : currentPrincipal.instanceName,
+      initial: (currentPrincipal.memberName || currentPrincipal.instanceName).slice(0, 1).toUpperCase(),
+    };
 
   let pageContent;
   if (route.page === "workspace") {

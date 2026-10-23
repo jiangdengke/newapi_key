@@ -18,7 +18,7 @@ export async function POST(request, { params }) {
   const { instanceId } = await params;
   try {
     requireSameOrigin(request);
-    const { instance } = requireInstanceAccess(request, instanceId);
+    const { instance, principal } = requireInstanceAccess(request, instanceId);
     if (!instance.enabled) {
       throw new HttpError(409, "该 New API 实例已停用");
     }
@@ -31,6 +31,7 @@ export async function POST(request, { params }) {
       requestBody?.group,
       requestBody?.models,
       requestBody?.awsApiType,
+      principal.kind === "visitor" ? principal.memberId : null,
     );
     const eventIterator = channelImport.events();
     const textEncoder = new TextEncoder();

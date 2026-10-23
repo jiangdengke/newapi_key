@@ -19,17 +19,27 @@ export async function POST(request, { params }) {
   const { instanceId } = await params;
   try {
     requireSameOrigin(request);
-    const { instance } = requireInstanceAccess(request, instanceId);
+    const { instance, principal } = requireInstanceAccess(request, instanceId);
+    const memberId = principal.kind === "visitor" ? principal.memberId : null;
     if (!instance.enabled) {
       throw new HttpError(409, "该 New API 实例已停用");
     }
     await readJsonBody(request);
-    const synchronization = await synchronizeInstanceRecords(instanceId, requestId);
+    const { memberCounts, ...synchronization } = await synchronizeInstanceRecords(instanceId, requestId);
+    const visibleSynchronization = memberId
+      ? {
+        ...synchronization,
+        synchronizedCount: memberCounts.get(memberId)?.synchronizedCount ?? 0,
+        missingCount: memberCounts.get(memberId)?.missingCount ?? 0,
+        usageStartedRecords: synchronization.usageStartedRecords
+          .filter((record) => record.memberId === memberId),
+      }
+      : synchronization;
     return jsonResponse({
       success: true,
       data: {
-        ...synchronization,
-        records: context.store.listRecords(instanceId),
+        ...visibleSynchronization,
+        records: context.store.listRecords(instanceId, memberId),
       },
     }, { requestId });
   } catch (error) {

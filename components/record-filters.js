@@ -10,6 +10,7 @@ export const EMPTY_RECORD_FILTERS = Object.freeze({
   search: "",
   model: "",
   instanceId: "",
+  memberId: "",
   statusLabel: "",
   channelKind: "",
   group: "",
@@ -42,6 +43,7 @@ export function createRecordQuery(filters, sort, { page, pageSize }) {
     search: filters.search.trim(),
     model: filters.model.trim(),
     instanceId: filters.instanceId ? Number(filters.instanceId) : null,
+    memberId: filters.memberId ? Number(filters.memberId) : null,
     statusLabel: filters.statusLabel,
     channelKind: filters.channelKind,
     group: filters.group,
@@ -89,6 +91,13 @@ export default function RecordFilterBar({
     label: instance.name,
     count: countFacetValue(facets?.instances, instance.id),
   }));
+  const memberOptions = facets?.members
+    ?.filter((memberCount) => !filters.instanceId || String(memberCount.instanceId) === filters.instanceId)
+    .map((memberCount) => ({
+      value: String(memberCount.value),
+      label: filters.instanceId ? memberCount.label.split(" · ").slice(1).join(" · ") : memberCount.label,
+      count: memberCount.count,
+    }));
 
   return (
     <div className="toolbar record-filter-bar">
@@ -112,7 +121,16 @@ export default function RecordFilterBar({
           allLabel="所有实例"
           value={filters.instanceId}
           options={instanceOptions}
-          onChange={(value) => updateFilter("instanceId", value)}
+          onChange={(value) => onFiltersChange({ ...filters, instanceId: value, memberId: "" })}
+        />
+      ) : null}
+      {memberOptions?.length ? (
+        <FacetFilter
+          label="成员"
+          allLabel="所有成员"
+          value={filters.memberId}
+          options={memberOptions}
+          onChange={(value) => updateFilter("memberId", value)}
         />
       ) : null}
       <FacetFilter

@@ -13,7 +13,7 @@ function createAccessibleInstance(instance) {
   if (!instance) {
     return null;
   }
-  const { adminUsername, accessKey, ...accessibleInstance } = instance;
+  const { adminUsername, memberCount, activeMemberCount, ...accessibleInstance } = instance;
   return accessibleInstance;
 }
 

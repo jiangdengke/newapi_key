@@ -12,12 +12,13 @@ import {
   ListChecks,
   RefreshCw,
   Rocket,
+  Tag,
   TriangleAlert,
   Wallet,
 } from "lucide-react";
 
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
-import { formatDateTime, formatUsd } from "../lib/format.js";
+import { formatChannelNamePattern, formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
 import { diagnoseAwsCredential, parseAwsCredential } from "../lib/validation.js";
 import RecordFilterBar, {
@@ -685,6 +686,12 @@ export default function InstanceWorkspace({
   }
 
   const instance = configuration.instance;
+  const channelDefaults = configuration.channelDefaults;
+  const channelNamePattern = formatChannelNamePattern({
+    namePrefix: channelDefaults.namePrefix,
+    dateMode: channelDefaults.dateSegment,
+    startNumber: channelDefaults.startNumber,
+  });
   const selectedChannelDetails = getChannelKindDetails(selectedChannelKind);
   const selectedInputByChannelKind = {
     [CLAUDE_CHANNEL_KIND]: {
@@ -731,7 +738,9 @@ export default function InstanceWorkspace({
       {backButton}
       <PageHeader
         title={instance.name}
-        description={`New API：${instance.baseUrl}`}
+        description={configuration.member
+          ? `成员：${configuration.member.name} · New API：${instance.baseUrl}`
+          : `New API：${instance.baseUrl}`}
         actions={(
           <>
             <StatusText status={instance.enabled ? "enabled" : "disabled"}>
@@ -896,6 +905,14 @@ export default function InstanceWorkspace({
             {!instance.enabled ? (
               <p className="callout callout-warning">该实例已停用，暂时无法导入渠道。</p>
             ) : null}
+            <div className="naming-hint" aria-label="渠道命名规则">
+              <Tag size={14} aria-hidden="true" />
+              <span>
+                渠道命名 <code>{channelNamePattern}</code>
+                {channelDefaults.continueFromExisting ? " 起，自动接续上游同前缀的最大序号" : " 起"}
+              </span>
+              <span className="naming-hint-meta">优先级 {channelDefaults.priority} · 权重 {channelDefaults.weight}</span>
+            </div>
             <div className="card-actions">
               <button
                 className="btn btn-primary"

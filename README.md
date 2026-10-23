@@ -1,18 +1,18 @@
 # New API Key 管理系统
 
-基于 Next.js 的 New API 多实例 Claude、OpenAI 与 Grok Key 管理工具。管理员可以维护多个 New API 实例，为每个实例生成独立访问 Key；使用者通过访问 Key 进入指定实例，分别批量创建 Claude、OpenAI 或 Grok 渠道、查询本地导入历史并同步渠道状态与用量。
+基于 Next.js 的 New API 多实例 Claude、OpenAI 与 Grok Key 管理工具。管理员可以维护多个 New API 实例，并为每个实例添加多个访问成员，每个成员持有独立访问 Key 和渠道名称前缀；使用者通过自己的访问 Key 进入指定实例，分别批量创建 Claude、OpenAI 或 Grok 渠道、查询本地导入历史并同步渠道状态与用量。
 
 ## 主要能力
 
 - 多个 New API 实例统一管理。
-- 每个实例使用独立访问 Key，访客会话仅能访问绑定实例。
-- 分别批量导入 Anthropic Key、官方 OpenAI Key、官方 xAI Key 和 AWS Bedrock 凭证（AK/SK 或 API Key），并按实例配置的前缀、日期模式和共享序号创建渠道。
+- 同一实例可发给多人：每个访问成员有独立访问 Key，可单独设置名称前缀、日期模式、起始序号、优先级和权重（留空沿用实例），只能看到自己导入的渠道；访客会话仅能访问绑定实例。
+- 分别批量导入 Anthropic Key、官方 OpenAI Key、官方 xAI Key 和 AWS Bedrock 凭证（AK/SK 或 API Key），并按成员（或实例）配置的前缀、日期模式和序号创建渠道。
 - 每个实例可分别为 Claude、OpenAI、Grok 配置默认模型，访问者导入时可临时增删；默认分别为三个 Claude Opus 模型、`gpt-5.6-sol` 和 10 个 Grok 模型。
 - 会动态加载 New API 当前已有分组，Claude、OpenAI、Grok 导入时均可单独选择一个分组；默认优先选择 `anthropic`、`openai`、`xai`。
 - Claude、OpenAI 与 Grok 通过同一导入面板中的并列按钮切换，未提交的输入内容分别保留。
 - 界面沿用 New API 控制台风格：左侧导航、浅色与深色主题，并适配移动端。
 - 同步渠道累计用量，并在脱敏 Key 首次开始产生用量时显示轻提示。
-- 支持实例级渠道优先级和权重。
+- 支持实例级渠道优先级和权重，访问成员可单独覆盖。
 - SQLite 保存实例配置、访问会话和脱敏渠道历史。
 - 完整导入 Key 使用 AES-256-GCM 加密保存，同时保存掩码和 SHA-256 指纹。
 - 支持 Docker Compose 部署。

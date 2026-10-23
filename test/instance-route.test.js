@@ -5,6 +5,7 @@ import test from "node:test";
 import { GET as getInstanceConfiguration } from "../app/api/instances/[instanceId]/config/route.js";
 import { GET as getInstanceGroups } from "../app/api/instances/[instanceId]/groups/route.js";
 import { POST as importChannels } from "../app/api/instances/[instanceId]/import/route.js";
+import { POST as synchronizeVisitorRecords } from "../app/api/instances/[instanceId]/records/sync/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
 import { SESSION_COOKIE_NAME } from "../lib/http.js";
 import { synchronizeInstanceRecords } from "../lib/instance-service.js";
@@ -150,7 +151,7 @@ function createMockNewApiServer(createdChannelRequests, storedChannels) {
         return;
       }
       storedChannels.push({
-        id: 107,
+        id: 107 + storedChannels.length,
         type: requestBody.channel.type,
         name: requestBody.channel.name,
         group: requestBody.channel.group,
@@ -260,7 +261,7 @@ test("instance import route streams safe per-key results", async () => {
       dateMode: "0711",
       enabled: true,
     });
-    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
     const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
 
     const anonymousResponse = await importChannels(
@@ -363,7 +364,7 @@ test("standard New API import creates an official OpenAI channel", async () => {
       dateMode: "0711",
       enabled: true,
     });
-    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
     const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
     const response = await importChannels(
       createImportRequest(
@@ -457,7 +458,7 @@ test("standard New API import creates an official xAI Grok channel", async () =>
       dateMode: "0711",
       enabled: true,
     });
-    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
     const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
 
     const groupsResponse = await getInstanceGroups(
@@ -581,7 +582,7 @@ test("import uses instance channel models and per-import model overrides", async
       },
       enabled: true,
     });
-    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
     const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
 
     const configurationResponse = await getInstanceConfiguration(
@@ -629,6 +630,106 @@ test("import uses instance channel models and per-import model overrides", async
   }
 });
 
+test("each member imports with its own name prefix and channel defaults", async () => {
+  const createdChannelRequests = [];
+  const storedChannels = [];
+  const mockNewApiServer = createMockNewApiServer(createdChannelRequests, storedChannels);
+  const mockNewApiBaseUrl = await listenOnAvailablePort(mockNewApiServer);
+  const store = new ApplicationStore({
+    databasePath: ":memory:",
+    encryptionKey: Buffer.alloc(32, 25),
+    initialInstance: null,
+    bootstrapAdmin: {
+      username: "system-administrator",
+      password: ADMINISTRATOR_PASSWORD,
+    },
+  });
+  const restoreRuntimeContext = installTestRuntimeContext(store);
+
+  try {
+    const instance = store.createInstance({
+      name: "Shared instance",
+      baseUrl: mockNewApiBaseUrl,
+      username: "new-api-administrator",
+      password: NEW_API_PASSWORD,
+      group: "anthropic",
+      namePrefix: "claude",
+      startNumber: 1,
+      continueFromExisting: true,
+      priority: 1,
+      weight: 2,
+      dateMode: "0101",
+      enabled: true,
+    });
+    const overridingMember = store.createInstanceMember(instance.id, {
+      name: "张三",
+      namePrefix: "zhangsan",
+      dateMode: "",
+      startNumber: 5,
+      priority: 9,
+      weight: 4,
+    });
+    const inheritingMember = store.createInstanceMember(instance.id, { name: "李四", namePrefix: "lisi" });
+    const overridingSession = store.createVisitorSessionForAccessKey(overridingMember.accessKey);
+    const inheritingSession = store.createVisitorSessionForAccessKey(inheritingMember.accessKey);
+    const routeContext = { params: Promise.resolve({ instanceId: String(instance.id) }) };
+
+    const configurationPayload = await (await getInstanceConfiguration(
+      createInstanceGetRequest(instance.id, overridingSession.token, "config"),
+      routeContext,
+    )).json();
+    assert.equal(configurationPayload.data.member.name, "张三");
+    assert.equal(configurationPayload.data.channelDefaults.namePrefix, "zhangsan");
+    assert.equal(configurationPayload.data.channelDefaults.dateSegment, "");
+    assert.equal(configurationPayload.data.instance.memberCount, undefined);
+
+    const overridingResponse = await importChannels(
+      createImportRequest(instance.id, overridingSession.token, ["sk-ant-zhangsan-key"], "claude", "anthropic"),
+      routeContext,
+    );
+    assert.equal((await overridingResponse.text()).includes("\"failure\":0"), true);
+    const inheritingResponse = await importChannels(
+      createImportRequest(instance.id, inheritingSession.token, ["sk-ant-lisi-key"], "claude", "anthropic"),
+      routeContext,
+    );
+    assert.equal((await inheritingResponse.text()).includes("\"failure\":0"), true);
+
+    assert.deepEqual(
+      createdChannelRequests.map(({ channel }) => [channel.name, channel.priority, channel.weight]),
+      [["zhangsan-005", 9, 4], ["lisi-0101-001", 1, 2]],
+    );
+    assert.deepEqual(
+      store.listRecords(instance.id, overridingMember.member.id).map((record) => record.channelName),
+      ["zhangsan-005"],
+    );
+    assert.deepEqual(
+      store.listRecords(instance.id, inheritingMember.member.id).map((record) => record.channelName),
+      ["lisi-0101-001"],
+    );
+
+    const synchronizationResponse = await synchronizeVisitorRecords(
+      new Request(`http://localhost/api/instances/${instance.id}/records/sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(overridingSession.token)}`,
+          Host: "localhost",
+        },
+        body: "{}",
+      }),
+      routeContext,
+    );
+    const synchronizationData = (await synchronizationResponse.json()).data;
+    assert.equal(synchronizationData.synchronizedCount, 1);
+    assert.equal(synchronizationData.memberCounts, undefined);
+    assert.deepEqual(synchronizationData.records.map((record) => record.channelName), ["zhangsan-005"]);
+  } finally {
+    restoreRuntimeContext();
+    store.close();
+    await closeServer(mockNewApiServer);
+  }
+});
+
 test("AWS import creates type 33 channels with key type and interface settings", async () => {
   const createdChannelRequests = [];
   const storedChannels = [];
@@ -662,7 +763,7 @@ test("AWS import creates type 33 channels with key type and interface settings",
       dateMode: "",
       enabled: true,
     });
-    const generatedAccess = store.regenerateInstanceAccessKey(instance.id);
+    const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
     const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
     const request = createImportRequest(
       instance.id,

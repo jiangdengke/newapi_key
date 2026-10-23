@@ -143,6 +143,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
     debouncedSearch,
     debouncedModel,
     filters.instanceId,
+    filters.memberId,
     filters.statusLabel,
     filters.channelKind,
     filters.group,
@@ -409,7 +410,7 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
                     onChange={toggleCurrentPageSelection}
                   />
                 </th>
-                <th>实例</th>
+                <th>实例 / 成员</th>
                 <th>渠道</th>
                 <th>Key</th>
                 <th>状态</th>
@@ -433,7 +434,12 @@ export default function AdminRecordsOverview({ instances, onOpenInstance }) {
                       onChange={() => toggleRecordSelection(record.id)}
                     />
                   </td>
-                  <td><strong>{record.instanceName}</strong></td>
+                  <td>
+                    <div className="cell-stack">
+                      <strong>{record.instanceName}</strong>
+                      <span className="cell-muted">{record.memberName || "未归属成员"}</span>
+                    </div>
+                  </td>
                   <td>
                     <div className="cell-stack">
                       <strong>{record.channelName}</strong>

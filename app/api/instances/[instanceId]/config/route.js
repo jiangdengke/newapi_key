@@ -5,7 +5,7 @@ import {
   jsonResponse,
 } from "../../../../../lib/http.js";
 import { getRuntimeContext } from "../../../../../lib/runtime-context.js";
-import { validateChannelDefaults } from "../../../../../lib/validation.js";
+import { resolveChannelDefaults } from "../../../../../lib/instance-service.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,17 +15,12 @@ export async function GET(request, { params }) {
   const context = getRuntimeContext();
   const { instanceId } = await params;
   try {
-    const { instance } = requireInstanceAccess(request, instanceId);
-    const { adminUsername, accessKey, ...accessibleInstance } = instance;
-    const channelDefaults = validateChannelDefaults({
-      group: instance.group,
-      namePrefix: instance.namePrefix,
-      startNumber: instance.startNumber,
-      continueFromExisting: instance.continueFromExisting,
-      priority: instance.priority,
-      weight: instance.weight,
-      dateMode: instance.dateMode,
-    });
+    const { instance, principal } = requireInstanceAccess(request, instanceId);
+    const member = principal.kind === "visitor"
+      ? context.store.getInstanceMember(principal.memberId)
+      : null;
+    const { adminUsername, memberCount, activeMemberCount, ...accessibleInstance } = instance;
+    const channelDefaults = resolveChannelDefaults(instance, member);
     return jsonResponse({
       success: true,
       data: {
@@ -33,6 +28,7 @@ export async function GET(request, { params }) {
         models: instance.channelModels.claude,
         modelsByChannelKind: instance.channelModels,
         channelDefaults,
+        member: member ? { id: member.id, name: member.name, namePrefix: member.namePrefix } : null,
       },
     }, { requestId });
   } catch (error) {

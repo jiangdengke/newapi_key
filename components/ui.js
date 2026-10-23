@@ -30,9 +30,38 @@ import {
 
 import { getStatusText } from "../lib/format.js";
 
-function useOverlayBehavior(isOpen, onEscape) {
+const escapeLayers = [];
+
+function handleEscapeKey(event) {
+  if (event.key === "Escape") {
+    escapeLayers.at(-1)?.current?.();
+  }
+}
+
+// Only the most recently opened overlay, menu or popover reacts to Escape.
+function useEscapeLayer(isActive, onEscape) {
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
+
+  useEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+    if (escapeLayers.length === 0) {
+      document.addEventListener("keydown", handleEscapeKey);
+    }
+    escapeLayers.push(onEscapeRef);
+    return () => {
+      escapeLayers.splice(escapeLayers.lastIndexOf(onEscapeRef), 1);
+      if (escapeLayers.length === 0) {
+        document.removeEventListener("keydown", handleEscapeKey);
+      }
+    };
+  }, [isActive]);
+}
+
+function useOverlayBehavior(isOpen, onEscape) {
+  useEscapeLayer(isOpen, onEscape);
 
   useEffect(() => {
     if (!isOpen) {
@@ -40,15 +69,8 @@ function useOverlayBehavior(isOpen, onEscape) {
     }
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    function handleKeyDown(event) {
-      if (event.key === "Escape") {
-        onEscapeRef.current?.();
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen]);
 }
@@ -306,14 +328,14 @@ export function TagInput({
   );
 }
 
-export function Switch({ checked, onChange, disabled = false, label, description }) {
+export function Switch({ checked, onChange, disabled = false, label, description, ariaLabel }) {
   const control = (
     <button
       className={`switch ${checked ? "is-on" : ""}`}
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-label={typeof label === "string" ? label : undefined}
+      aria-label={ariaLabel ?? (typeof label === "string" ? label : undefined)}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >
@@ -364,6 +386,7 @@ export function DropdownMenu({ items, label = "更多操作", disabled = false }
   const buttonRef = useRef(null);
   const menuRef = useRef(null);
   const visibleItems = items.filter(Boolean);
+  useEscapeLayer(Boolean(position), () => setPosition(null));
 
   useEffect(() => {
     if (!position) {
@@ -381,18 +404,11 @@ export function DropdownMenu({ items, label = "更多操作", disabled = false }
     function closeMenu() {
       setPosition(null);
     }
-    function handleKeyDown(event) {
-      if (event.key === "Escape") {
-        setPosition(null);
-      }
-    }
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", closeMenu);
     window.addEventListener("scroll", closeMenu, true);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", closeMenu);
       window.removeEventListener("scroll", closeMenu, true);
     };
@@ -609,6 +625,7 @@ export function FacetFilter({ label, value, options, onChange, allLabel }) {
   const visibleOptions = normalizedOptionQuery
     ? options.filter((option) => String(option.label).toLowerCase().includes(normalizedOptionQuery))
     : options;
+  useEscapeLayer(isOpen, () => setIsOpen(false));
 
   useEffect(() => {
     if (!isOpen) {
@@ -619,16 +636,9 @@ export function FacetFilter({ label, value, options, onChange, allLabel }) {
         setIsOpen(false);
       }
     }
-    function handleKeyDown(event) {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
-    }
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen]);
 
