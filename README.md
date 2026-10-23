@@ -6,7 +6,7 @@
 
 - 多个 New API 实例统一管理。
 - 每个实例使用独立访问 Key，访客会话仅能访问绑定实例。
-- 分别批量导入 Anthropic Key、官方 OpenAI Key、官方 xAI Key 和 AWS Bedrock 凭证（AK/SK 或 API Key），并按实例配置的前缀、日期模式和共享序号创建渠道。
+- 分别批量导入 Anthropic Key、官方 OpenAI Key、官方 xAI Key 和 AWS Bedrock 凭证（API Key 或 AK/SK，可直接粘贴，区域按默认值补全），并按实例配置的前缀、日期模式和共享序号创建渠道。
 - 每个实例可分别为 Claude、OpenAI、Grok 配置默认模型，访问者导入时可临时增删；默认分别为三个 Claude Opus 模型、`gpt-5.6-sol` 和 10 个 Grok 模型。
 - 会动态加载 New API 当前已有分组，Claude、OpenAI、Grok 导入时均可单独选择一个分组；默认优先选择 `anthropic`、`openai`、`xai`。
 - Claude、OpenAI 与 Grok 通过同一导入面板中的并列按钮切换，未提交的输入内容分别保留。

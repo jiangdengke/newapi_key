@@ -698,6 +698,25 @@ test("AWS import creates type 33 channels with key type and interface settings",
       aws_api_type: "mantle",
     });
 
+    const defaultRegionRequest = createImportRequest(
+      instance.id,
+      session.token,
+      ["LLM_000000000000000_ExampleBedrockKey"],
+      "aws",
+      "premium",
+    );
+    const defaultRegionResponse = await importChannels(
+      new Request(defaultRegionRequest.url, {
+        method: "POST",
+        headers: defaultRegionRequest.headers,
+        body: JSON.stringify({ ...JSON.parse(await defaultRegionRequest.text()), awsRegion: "eu-central-1" }),
+      }),
+      { params: Promise.resolve({ instanceId: String(instance.id) }) },
+    );
+    assert.equal((await defaultRegionResponse.text()).includes("\"success\":1"), true);
+    assert.equal(createdChannelRequests[2].channel.key, "LLM_000000000000000_ExampleBedrockKey|eu-central-1");
+    assert.equal(JSON.parse(createdChannelRequests[2].channel.settings).aws_key_type, "api_key");
+
     const invalidResponse = await importChannels(
       createImportRequest(instance.id, session.token, ["AKIAEXAMPLE000000001|missing-region"], "aws", "premium"),
       { params: Promise.resolve({ instanceId: String(instance.id) }) },

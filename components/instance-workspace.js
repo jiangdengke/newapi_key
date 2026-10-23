@@ -18,7 +18,7 @@ import {
 import { readJsonResponse, requestJson } from "../lib/client-api.js";
 import { formatDateTime, formatUsd } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
-import { parseAwsCredential } from "../lib/validation.js";
+import { AWS_REGIONS, parseAwsCredential } from "../lib/validation.js";
 import RecordFilterBar, {
   CHANNEL_KIND_FILTER_LABELS,
   createRecordQuery,
@@ -86,8 +86,8 @@ const CHANNEL_KIND_DETAILS = Object.freeze({
   [AWS_CHANNEL_KIND]: Object.freeze({
     label: "AWS",
     keyLabel: "AWS 凭证",
-    keyPlaceholder: "每行一个凭证：\nAccessKey|SecretAccessKey|Region\n或 APIKey|Region",
-    description: "使用 Amazon Bedrock 凭证创建 AWS 渠道，每行可以是 AK/SK 或 API Key",
+    keyPlaceholder: "每行一个凭证，直接粘贴即可：\nAPIKey\nAccessKey|SecretAccessKey\n需要单独指定区域时在行尾加 |Region",
+    description: "使用 Amazon Bedrock 凭证创建 AWS 渠道，每行可以是 API Key 或 AK/SK",
     defaultGroup: "aws",
   }),
 });
@@ -123,12 +123,12 @@ function hasSameModels(firstModels, secondModels) {
     && firstModels.every((model, modelIndex) => model === secondModels[modelIndex]);
 }
 
-function describeAwsCredentials(credentials) {
+function describeAwsCredentials(credentials, defaultRegion) {
   let accessKeyCount = 0;
   let apiKeyCount = 0;
   let invalidCount = 0;
   for (const credential of credentials) {
-    const parsedCredential = parseAwsCredential(credential);
+    const parsedCredential = parseAwsCredential(credential, defaultRegion);
     if (!parsedCredential) {
       invalidCount += 1;
     } else if (parsedCredential.keyType === "ak_sk") {
@@ -191,6 +191,7 @@ export default function InstanceWorkspace({
   const [grokKeysText, setGrokKeysText] = useState("");
   const [awsKeysText, setAwsKeysText] = useState("");
   const [awsApiType, setAwsApiType] = useState(AWS_API_TYPE_OPTIONS[0].value);
+  const [awsRegion, setAwsRegion] = useState(AWS_REGIONS[0]);
   const [selectedChannelKind, setSelectedChannelKind] = useState(CLAUDE_CHANNEL_KIND);
   const [availableGroups, setAvailableGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState(createDefaultSelectedGroups);
@@ -508,7 +509,7 @@ export default function InstanceWorkspace({
           channelKind,
           group: selectedGroup,
           models: channelModels,
-          ...(channelKind === AWS_CHANNEL_KIND ? { awsApiType } : {}),
+          ...(channelKind === AWS_CHANNEL_KIND ? { awsApiType, awsRegion } : {}),
         }),
       });
       if (!response.ok || !response.body) {
@@ -782,6 +783,22 @@ export default function InstanceWorkspace({
             </Field>
             {selectedChannelKind === AWS_CHANNEL_KIND ? (
               <Field
+                label="默认区域"
+                hint="凭证没写区域时使用；某一行需要别的区域，在行尾加 |Region 即可。"
+              >
+                <Select
+                  value={awsRegion}
+                  disabled={!instance.enabled || isImporting}
+                  onChange={(event) => setAwsRegion(event.target.value)}
+                >
+                  {AWS_REGIONS.map((region) => (
+                    <option key={region} value={region}>{region}</option>
+                  ))}
+                </Select>
+              </Field>
+            ) : null}
+            {selectedChannelKind === AWS_CHANNEL_KIND ? (
+              <Field
                 label="AWS 接口"
                 hint="Mantle 支持 Claude 模型和自动提示缓存；旧模型和 Amazon Nova 请继续使用 InvokeModel。"
               >
@@ -833,7 +850,7 @@ export default function InstanceWorkspace({
               extra={(
                 <span className="field-counter">
                   {selectedChannelKind === AWS_CHANNEL_KIND
-                    ? describeAwsCredentials(uniqueAwsKeys)
+                    ? describeAwsCredentials(uniqueAwsKeys, awsRegion)
                     : `共 ${selectedInput.uniqueKeys.length} 个有效 Key`}
                 </span>
               )}
