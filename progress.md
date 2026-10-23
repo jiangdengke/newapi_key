@@ -1317,3 +1317,24 @@
 - `app/layout.js`：同步更新页面元数据描述以包含 Claude、OpenAI 与 Grok。
 - `progress.md`：追加本轮实现、验证证据和回滚方式。
 - 回滚方式：恢复上述文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-10-23 - Task: 升级 Next.js 修复已公开漏洞
+
+### What was done
+
+- `next` 从 `16.2.10` 升级到 `16.4.2`，修复 16.2.10 上已公开的远程代码执行、SSRF、缓存投毒和 DoS 等漏洞。
+- `postcss` override 从存在漏洞的 `8.5.16` 改为 `8.5.31`；`npm audit fix` 同步更新 `baseline-browser-mapping` 等传递依赖。
+- `next.config.js` 设置 `images.unoptimized: true`，应用未使用 `next/image`，关闭后 `/_next/image` 返回 404。
+
+### Testing
+
+- `npm audit`：0 个漏洞。
+- `npm test`：通过；40 项测试全部通过。
+- `npm run build`：通过。
+- 本地 standalone 冒烟：首页 200，未登录 `/api/auth/me` 401，`/_next/image` 404。
+
+### Notes
+
+- `package.json`、`package-lock.json`：升级依赖并更新 postcss override。
+- `next.config.js`：关闭图片优化接口。
+- 回滚方式：恢复上述文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。

@@ -14,11 +14,11 @@
     "node": ">=24"
   },
   "dependencies": {
-    "next": "^16.2.10",
+    "next": "^16.4.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "overrides": {
-    "postcss": "8.5.16"
+    "postcss": "8.5.31"
   }
 }
