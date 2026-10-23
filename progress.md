@@ -1338,3 +1338,29 @@
 - `package.json`、`package-lock.json`：升级依赖并更新 postcss override。
 - `next.config.js`：关闭图片优化接口。
 - 回滚方式：恢复上述文件到本轮开始前版本；本轮未修改 SQLite schema 或正式数据。
+
+## 2026-10-23 - Task: 移除 Admin Hub 连接协议
+
+### What was done
+
+- 删除 Admin Hub 客户端、站点加载接口 `/api/admin/admin-hub/sites` 和对应测试；所有实例统一使用 New API 客户端。
+- 实例校验、存储和接口不再接收或返回 `connectionProtocol`、`adminHubTargetSiteId`。
+- 管理端移除连接协议下拉框、目标站点选择和实例卡片中的协议、站点信息；工作区始终显示 Grok 渠道并从 New API 已有分组中选择。
+- schema 升级到 7：启动时停用原 Admin Hub 实例并撤销其访客 Session，然后删除 `connection_protocol` 和 `admin_hub_target_site_id` 两列；本地渠道历史保留。
+- `README.md`、`docs/nextjs-usage.md` 删除 Admin Hub 说明并补充 schema 7 升级行为。
+
+### Testing
+
+- `npm test`：通过；35 项测试全部通过。移除 5 项 Admin Hub 专属测试，新增 schema 7 迁移测试，验证旧 Admin Hub 实例被停用、访客 Session 被撤销、两列被删除且 New API 密码仍可解密。
+- `npm run build`：通过；路由列表不再包含 `/api/admin/admin-hub/sites`。
+- `git diff --check`：通过。
+
+### Notes
+
+- `lib/admin-hub-client.js`、`app/api/admin/admin-hub/sites/route.js`、`test/admin-hub-sites-route.test.js`：删除。
+- `lib/application-store.js`：移除协议字段读写，增加 schema 7 迁移。
+- `lib/admin-validation.js`、`lib/runtime-context.js`、`lib/instance-service.js`：移除协议校验、客户端分支和 Admin Hub 专用渠道参数。
+- `app/api/admin/instances/[instanceId]/test/route.js`、`app/api/instances/route.js`、`app/api/instances/[instanceId]/config/route.js`、`app/api/instances/[instanceId]/groups/route.js`：移除协议字段和协议判断。
+- `components/admin-dashboard.js`、`components/instance-workspace.js`、`app/globals.css`：移除 Admin Hub 界面和样式。
+- `test/admin-validation.test.js`、`test/application-store.test.js`、`test/authorization.test.js`、`test/instance-route.test.js`：更新测试。
+- 回滚方式：恢复上述文件到本轮开始前版本，并恢复升级前的 SQLite 备份；schema 7 删除的两列无法由旧版本自动恢复。

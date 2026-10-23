@@ -286,20 +286,13 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
     };
   }, [instanceId]);
 
-  useEffect(() => {
-    if (configuration?.instance.connectionProtocol === "new-api") {
-      loadAvailableGroups();
-    }
-  }, [instanceId, configuration?.instance.connectionProtocol]);
+  const configuredInstanceId = configuration?.instance.id;
 
   useEffect(() => {
-    if (
-      configuration?.instance.connectionProtocol !== "new-api"
-      && selectedChannelKind === GROK_CHANNEL_KIND
-    ) {
-      setSelectedChannelKind(CLAUDE_CHANNEL_KIND);
+    if (configuredInstanceId) {
+      loadAvailableGroups();
     }
-  }, [configuration, selectedChannelKind]);
+  }, [instanceId, configuredInstanceId]);
 
   function processProgressEvent(event, successfulKeyIndexes) {
     if (event.type === "ready") {
@@ -389,11 +382,8 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       ?? importInputByChannelKind[CLAUDE_CHANNEL_KIND];
     const { uniqueKeys, setKeysText } = selectedImportInput;
     const channelKindLabel = getChannelKindLabel(channelKind);
-    const requiresGroupSelection = (
-      configuration?.instance.connectionProtocol === "new-api"
-    );
     const selectedGroup = selectedGroups[channelKind] ?? "";
-    if (requiresGroupSelection && !availableGroups.includes(selectedGroup)) {
+    if (!availableGroups.includes(selectedGroup)) {
       const errorMessage = groupError || "请先选择一个当前可用的分组";
       setPageError(errorMessage);
       showToast(errorMessage, { type: "error" });
@@ -420,7 +410,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
         body: JSON.stringify({
           keys: uniqueKeys,
           channelKind,
-          ...(requiresGroupSelection ? { group: selectedGroup } : {}),
+          group: selectedGroup,
         }),
       });
       if (!response.ok || !response.body) {
@@ -589,7 +579,6 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   }
 
   const instance = configuration.instance;
-  const supportsGrokImport = instance.connectionProtocol === "new-api";
   const isClaudeSelected = selectedChannelKind === CLAUDE_CHANNEL_KIND;
   const isOpenAiSelected = selectedChannelKind === OPENAI_CHANNEL_KIND;
   const isGrokSelected = selectedChannelKind === GROK_CHANNEL_KIND;
@@ -613,18 +602,14 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
   };
   const selectedInput = selectedInputByChannelKind[selectedChannelKind]
     ?? selectedInputByChannelKind[CLAUDE_CHANNEL_KIND];
-  const supportsGroupSelection = instance.connectionProtocol === "new-api";
   const selectedGroup = selectedGroups[selectedChannelKind] ?? "";
   const selectedAvailableGroup = availableGroups.includes(selectedGroup)
     ? selectedGroup
     : "";
-  const isGroupSelectionUnavailable = (
-    supportsGroupSelection
-    && (isLoadingGroups || !selectedAvailableGroup)
+  const isGroupSelectionUnavailable = isLoadingGroups || !selectedAvailableGroup;
+  const selectedChannelDescription = (
+    `${selectedChannelDetails.description}，分组从当前 New API 已有分组中选择。`
   );
-  const selectedChannelDescription = supportsGroupSelection
-    ? `${selectedChannelDetails.description}，分组从当前 New API 已有分组中选择。`
-    : `${selectedChannelDetails.description}，分组固定为 ${selectedChannelDetails.defaultGroup}。`;
   const progressPercentage = progress.total > 0
     ? Math.round((progress.completed / progress.total) * 100)
     : 0;
@@ -651,7 +636,7 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
       >
         <section className="panel">
           <div
-            className={`channel-kind-switch ${supportsGrokImport ? "three-options" : ""}`}
+            className="channel-kind-switch three-options"
             aria-label="选择导入渠道类型"
           >
             <button
@@ -672,17 +657,15 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
             >
               OpenAI 渠道
             </button>
-            {supportsGrokImport ? (
-              <button
-                className={`channel-kind-option ${isGrokSelected ? "active" : ""}`}
-                type="button"
-                aria-pressed={isGrokSelected}
-                disabled={isImporting}
-                onClick={() => setSelectedChannelKind(GROK_CHANNEL_KIND)}
-              >
-                Grok 渠道
-              </button>
-            ) : null}
+            <button
+              className={`channel-kind-option ${isGrokSelected ? "active" : ""}`}
+              type="button"
+              aria-pressed={isGrokSelected}
+              disabled={isImporting}
+              onClick={() => setSelectedChannelKind(GROK_CHANNEL_KIND)}
+            >
+              Grok 渠道
+            </button>
           </div>
           <div className="panel-heading">
             <div>
@@ -690,39 +673,37 @@ export default function InstanceWorkspace({ instanceId, canGoBack, onGoBack }) {
               <p>{selectedChannelDescription}</p>
             </div>
           </div>
-          {supportsGroupSelection ? (
-            <label className="field channel-group-field">
-              <span>分组</span>
-              <div className="channel-group-picker">
-                <select
-                  value={selectedAvailableGroup}
-                  disabled={!instance.enabled || isImporting || isLoadingGroups}
-                  onChange={(event) => setSelectedGroups((currentSelectedGroups) => ({
-                    ...currentSelectedGroups,
-                    [selectedChannelKind]: event.target.value,
-                  }))}
-                  required
-                >
-                  {availableGroups.length === 0 ? (
-                    <option value="">
-                      {isLoadingGroups ? "正在加载分组..." : "没有可用分组"}
-                    </option>
-                  ) : availableGroups.map((group) => (
-                    <option key={group} value={group}>{group}</option>
-                  ))}
-                </select>
-                <button
-                  className="button button-secondary"
-                  type="button"
-                  disabled={!instance.enabled || isImporting || isLoadingGroups}
-                  onClick={() => loadAvailableGroups({ showSuccess: true })}
-                >
-                  {isLoadingGroups ? "加载中..." : "刷新分组"}
-                </button>
-              </div>
-              {groupError ? <small className="channel-group-message">{groupError}</small> : null}
-            </label>
-          ) : null}
+          <label className="field channel-group-field">
+            <span>分组</span>
+            <div className="channel-group-picker">
+              <select
+                value={selectedAvailableGroup}
+                disabled={!instance.enabled || isImporting || isLoadingGroups}
+                onChange={(event) => setSelectedGroups((currentSelectedGroups) => ({
+                  ...currentSelectedGroups,
+                  [selectedChannelKind]: event.target.value,
+                }))}
+                required
+              >
+                {availableGroups.length === 0 ? (
+                  <option value="">
+                    {isLoadingGroups ? "正在加载分组..." : "没有可用分组"}
+                  </option>
+                ) : availableGroups.map((group) => (
+                  <option key={group} value={group}>{group}</option>
+                ))}
+              </select>
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={!instance.enabled || isImporting || isLoadingGroups}
+                onClick={() => loadAvailableGroups({ showSuccess: true })}
+              >
+                {isLoadingGroups ? "加载中..." : "刷新分组"}
+              </button>
+            </div>
+            {groupError ? <small className="channel-group-message">{groupError}</small> : null}
+          </label>
           <label className="field">
             <span>{selectedChannelDetails.keyLabel}</span>
             <textarea

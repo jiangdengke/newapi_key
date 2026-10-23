@@ -36,8 +36,6 @@ export async function POST(request, { params }) {
         systemName: systemStatus?.system_name || "New API",
         version: systemStatus?.version || "未知版本",
         username: authenticatedUser.username,
-        connectionProtocol: instanceRuntime.connection.connectionProtocol,
-        adminHubTargetSiteId: instanceRuntime.connection.adminHubTargetSiteId,
         channelAccessVerified: true,
       },
     }, { requestId });

@@ -8,10 +8,10 @@ import {
 
 function createValidInstanceInput(overrides = {}) {
   return {
-    name: "Deepnix",
-    baseUrl: "https://open.deepnix.ai/",
-    username: "supplier-user",
-    password: "supplier-password",
+    name: "Primary New API",
+    baseUrl: "https://new-api.example.com/",
+    username: "new-api-administrator",
+    password: "new-api-password",
     group: "anthropic",
     namePrefix: "claude",
     startNumber: 1,
@@ -24,54 +24,23 @@ function createValidInstanceInput(overrides = {}) {
   };
 }
 
-test("instance validation defaults to standard New API", () => {
+test("instance validation ignores removed Admin Hub fields", () => {
   const instanceInput = validateInstanceInput(createValidInstanceInput({
+    connectionProtocol: "admin-hub",
     adminHubTargetSiteId: 13,
   }));
 
-  assert.equal(instanceInput.connectionProtocol, "new-api");
-  assert.equal(instanceInput.adminHubTargetSiteId, null);
-  assert.equal(instanceInput.baseUrl, "https://open.deepnix.ai");
-});
-
-test("instance validation accepts Admin Hub target site 13", () => {
-  const instanceInput = validateInstanceInput(createValidInstanceInput({
-    connectionProtocol: "admin-hub",
-    adminHubTargetSiteId: "13",
-  }));
-
-  assert.equal(instanceInput.connectionProtocol, "admin-hub");
-  assert.equal(instanceInput.adminHubTargetSiteId, 13);
-});
-
-test("instance validation rejects invalid protocols and Admin Hub site IDs", () => {
-  assert.throws(
-    () => validateInstanceInput(createValidInstanceInput({
-      connectionProtocol: "unsupported",
-    })),
-    /连接协议无效/,
-  );
-
-  for (const invalidSiteId of [undefined, "", 0, -1, 1.5]) {
-    assert.throws(
-      () => validateInstanceInput(createValidInstanceInput({
-        connectionProtocol: "admin-hub",
-        adminHubTargetSiteId: invalidSiteId,
-      })),
-      /Admin Hub 目标站点 ID 必须是正整数/,
-    );
-  }
+  assert.equal("connectionProtocol" in instanceInput, false);
+  assert.equal("adminHubTargetSiteId" in instanceInput, false);
+  assert.equal(instanceInput.baseUrl, "https://new-api.example.com");
 });
 
 test("instance validation permits an unchanged password while editing", () => {
   const instanceInput = validateInstanceInput(createValidInstanceInput({
     password: "",
-    connectionProtocol: "admin-hub",
-    adminHubTargetSiteId: 13,
   }), { passwordRequired: false });
 
   assert.equal(instanceInput.password, "");
-  assert.equal(instanceInput.adminHubTargetSiteId, 13);
 });
 
 test("administrator password validation requires matching passwords of sufficient length", () => {

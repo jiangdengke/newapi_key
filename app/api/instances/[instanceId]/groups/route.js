@@ -2,7 +2,6 @@ import { requireInstanceAccess } from "../../../../../lib/auth.js";
 import {
   createRequestId,
   errorResponse,
-  HttpError,
   jsonResponse,
 } from "../../../../../lib/http.js";
 import {
@@ -19,10 +18,7 @@ export async function GET(request, { params }) {
   const context = getRuntimeContext();
   const { instanceId } = await params;
   try {
-    const { instance } = requireInstanceAccess(request, instanceId);
-    if (instance.connectionProtocol !== "new-api") {
-      throw new HttpError(400, "分组选择仅支持标准 New API 实例");
-    }
+    requireInstanceAccess(request, instanceId);
     const instanceRuntime = getInstanceRuntime(instanceId);
     await getInstanceAuthenticatedUser(instanceRuntime);
     const groups = await instanceRuntime.client.listAvailableGroups();

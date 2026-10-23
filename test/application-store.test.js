@@ -201,13 +201,9 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
       (instance) => instance.baseUrl === LEGACY_BASE_URL,
     );
     assert.equal(configuredInstance.accessKey.configured, false);
-    assert.equal(configuredInstance.connectionProtocol, "new-api");
-    assert.equal(configuredInstance.adminHubTargetSiteId, null);
     assert.equal(configuredInstance.priority, 0);
     assert.equal(configuredInstance.weight, 0);
     assert.equal(placeholderInstance.enabled, false);
-    assert.equal(placeholderInstance.connectionProtocol, "new-api");
-    assert.equal(placeholderInstance.adminHubTargetSiteId, null);
     assert.equal(placeholderInstance.priority, 0);
     assert.equal(placeholderInstance.weight, 0);
     assert.match(placeholderInstance.name, /^待配置旧实例 /);
@@ -296,7 +292,7 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
     assert.equal(store.getInstance(placeholderInstance.id).id, placeholderInstance.id);
     assert.equal(store.deleteInstance(configuredInstance.id), null);
 
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 6);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 7);
     assert.deepEqual(store.database.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(store.database.prepare(`
       SELECT COUNT(*) AS total FROM users WHERE role = 'user'
@@ -319,65 +315,75 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
   }
 });
 
-test("ApplicationStore persists Admin Hub protocol and target site", () => {
-  const store = new ApplicationStore({
-    databasePath: ":memory:",
+test("ApplicationStore disables legacy Admin Hub instances and drops protocol columns", () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "newapi-application-store-"));
+  const databasePath = join(temporaryDirectory, "records.sqlite");
+  const storeOptions = {
+    databasePath,
     encryptionKey: ENCRYPTION_KEY,
     initialInstance: null,
     bootstrapAdmin: {
       username: "system-administrator",
       password: ADMINISTRATOR_PASSWORD,
     },
+  };
+  const instanceInput = {
+    username: "new-api-administrator",
+    password: "new-api-password",
+    group: "anthropic",
+    namePrefix: "claude",
+    startNumber: 1,
+    continueFromExisting: true,
+    priority: 0,
+    weight: 0,
+    dateMode: "auto",
+    enabled: true,
+  };
+  const versionSixStore = new ApplicationStore(storeOptions);
+  const standardInstance = versionSixStore.createInstance({
+    ...instanceInput,
+    name: "Standard New API",
+    baseUrl: "https://standard.example.com",
   });
+  const adminHubInstance = versionSixStore.createInstance({
+    ...instanceInput,
+    name: "Legacy Admin Hub",
+    baseUrl: "https://admin-hub.example.com",
+  });
+  const adminHubVisitorSession = versionSixStore.createVisitorSessionForAccessKey(
+    versionSixStore.regenerateInstanceAccessKey(adminHubInstance.id).accessKey,
+  );
+  versionSixStore.database.exec(`
+    ALTER TABLE new_api_instances
+    ADD COLUMN connection_protocol TEXT NOT NULL DEFAULT 'new-api';
+    ALTER TABLE new_api_instances ADD COLUMN admin_hub_target_site_id INTEGER;
+    PRAGMA user_version = 6;
+  `);
+  versionSixStore.database.prepare(`
+    UPDATE new_api_instances
+    SET connection_protocol = 'admin-hub', admin_hub_target_site_id = 13
+    WHERE id = ?
+  `).run(adminHubInstance.id);
+  versionSixStore.close();
 
+  const store = new ApplicationStore(storeOptions);
   try {
-    const createdInstance = store.createInstance({
-      name: "Deepnix Admin Hub",
-      baseUrl: "https://open.deepnix.ai",
-      username: "supplier-user",
-      password: "supplier-password",
-      connectionProtocol: "admin-hub",
-      adminHubTargetSiteId: 13,
-      group: "anthropic",
-      namePrefix: "claude",
-      startNumber: 1,
-      continueFromExisting: true,
-      priority: 0,
-      weight: 0,
-      dateMode: "auto",
-      enabled: true,
-    });
-    assert.equal(createdInstance.connectionProtocol, "admin-hub");
-    assert.equal(createdInstance.adminHubTargetSiteId, 13);
-
-    const connection = store.getInstanceConnection(createdInstance.id);
-    assert.equal(connection.connectionProtocol, "admin-hub");
-    assert.equal(connection.adminHubTargetSiteId, 13);
-    assert.equal(connection.password, "supplier-password");
-
-    const updatedInstance = store.updateInstance(createdInstance.id, {
-      name: createdInstance.name,
-      baseUrl: createdInstance.baseUrl,
-      username: createdInstance.adminUsername,
-      password: "",
-      connectionProtocol: "new-api",
-      adminHubTargetSiteId: null,
-      group: createdInstance.group,
-      namePrefix: createdInstance.namePrefix,
-      startNumber: createdInstance.startNumber,
-      continueFromExisting: createdInstance.continueFromExisting,
-      priority: createdInstance.priority,
-      weight: createdInstance.weight,
-      dateMode: createdInstance.dateMode,
-      enabled: true,
-    });
-    assert.equal(updatedInstance.connectionProtocol, "new-api");
-    assert.equal(updatedInstance.adminHubTargetSiteId, null);
+    assert.equal(store.getInstance(standardInstance.id).enabled, true);
+    assert.equal(store.getInstance(adminHubInstance.id).enabled, false);
+    assert.equal(store.getPrincipalBySessionToken(adminHubVisitorSession.token), null);
     assert.equal(
-      store.getInstanceConnection(createdInstance.id).password,
-      "supplier-password",
+      store.getInstanceConnection(adminHubInstance.id).password,
+      "new-api-password",
     );
+    const columnNames = store.database.prepare("PRAGMA table_info(new_api_instances)")
+      .all()
+      .map((column) => column.name);
+    assert.equal(columnNames.includes("connection_protocol"), false);
+    assert.equal(columnNames.includes("admin_hub_target_site_id"), false);
+    assert.equal("connectionProtocol" in store.getInstance(standardInstance.id), false);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 7);
   } finally {
     store.close();
+    rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });

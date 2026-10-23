@@ -128,11 +128,9 @@ test("route handlers isolate visitor instances and preserve administrator access
   const restoreRuntimeContext = installTestRuntimeContext(store);
 
   try {
-    const firstInstance = store.createInstance({
-      ...createInstanceInput("first", "https://first.example.com"),
-      connectionProtocol: "admin-hub",
-      adminHubTargetSiteId: 13,
-    });
+    const firstInstance = store.createInstance(
+      createInstanceInput("first", "https://first.example.com"),
+    );
     const secondInstance = store.createInstance(
       createInstanceInput("second", "https://second.example.com"),
     );
@@ -164,8 +162,6 @@ test("route handlers isolate visitor instances and preserve administrator access
     assert.equal(ownInstancePayload.data.instance.id, firstInstance.id);
     assert.equal("adminUsername" in ownInstancePayload.data.instance, false);
     assert.equal("accessKey" in ownInstancePayload.data.instance, false);
-    assert.equal("adminHubTargetSiteId" in ownInstancePayload.data.instance, false);
-    assert.equal(ownInstancePayload.data.instance.connectionProtocol, "admin-hub");
 
     const otherInstanceResponse = await getInstanceConfiguration(
       createAuthenticatedRequest(
@@ -187,7 +183,6 @@ test("route handlers isolate visitor instances and preserve administrator access
     assert.equal(administratorResponse.status, 200);
     const administratorPayload = await administratorResponse.json();
     assert.equal(administratorPayload.data.instances.length, 2);
-    assert.equal(administratorPayload.data.instances[0].adminHubTargetSiteId, 13);
 
     store.updateInstance(firstInstance.id, {
       ...firstInstance,
