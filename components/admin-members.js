@@ -2,13 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
-  Copy,
-  Eye,
-  EyeOff,
-  KeyRound,
   Pencil,
   Plus,
-  ShieldCheck,
   Trash2,
   Users,
 } from "lucide-react";
@@ -35,16 +30,6 @@ const DATE_CHOICES = Object.freeze({
   FIXED: "fixed",
 });
 
-const EMPTY_MEMBER_FORM = Object.freeze({
-  name: "",
-  namePrefix: "",
-  dateChoice: DATE_CHOICES.INHERIT,
-  fixedDate: "",
-  startNumber: "",
-  priority: "",
-  weight: "",
-});
-
 function describeDateMode(dateMode) {
   if (dateMode === "auto") {
     return "当天 MMDD";
@@ -61,6 +46,7 @@ function createMemberFormFromMember(member) {
   return {
     name: member.name,
     namePrefix: member.namePrefix,
+    userId: member.userId === null ? "" : String(member.userId),
     dateChoice,
     fixedDate: dateChoice === DATE_CHOICES.FIXED ? member.dateMode : "",
     startNumber: member.startNumber === null ? "" : String(member.startNumber),
@@ -87,6 +73,7 @@ function createMemberRequestBody(memberForm, enabled) {
   return {
     name: memberForm.name,
     namePrefix: memberForm.namePrefix,
+    userId: memberForm.userId ? Number(memberForm.userId) : null,
     dateMode: readDateMode(memberForm),
     startNumber: readOptionalNumber(memberForm.startNumber),
     priority: readOptionalNumber(memberForm.priority),
@@ -113,7 +100,7 @@ function InheritedValue({ value, inherited }) {
   );
 }
 
-function MemberFormFields({ instance, memberForm, onChange }) {
+function MemberFormFields({ instance, memberForm, onChange, editingMember, members, users }) {
   const previewDefaults = resolveMemberDefaults(instance, {
     namePrefix: memberForm.namePrefix.trim(),
     dateMode: readDateMode(memberForm),
@@ -129,6 +116,20 @@ function MemberFormFields({ instance, memberForm, onChange }) {
       <Field label="名称前缀" hint="该成员导入的渠道都以它开头，同一实例内不能重复。">
         <input className="input" placeholder="例如 zhangsan" value={memberForm.namePrefix} onChange={(event) => onChange("namePrefix", event.target.value)} required />
       </Field>
+      <Field label="绑定用户" hint="绑定后用户可访问此实例，并查看该成员已有记录。留空则不授权。" wide>
+        <Select value={memberForm.userId} onChange={(event) => onChange("userId", event.target.value)}>
+          <option value="">不绑定用户</option>
+          {users.map((user) => {
+            const otherMember = members.find((member) => member.id !== editingMember?.id && member.userId === user.id);
+            return (
+              <option key={user.id} value={user.id} disabled={Boolean(otherMember)}>
+                {user.username}{otherMember ? "（已绑定本实例其他成员）" : ""}
+              </option>
+            );
+          })}
+        </Select>
+      </Field>
+      <p className="callout callout-info field-wide">成员归属包含该成员的全部历史记录。改绑会让新用户获得这些记录，并撤销原用户的实例访问权限。</p>
       <Field label="日期模式" wide>
         <div className="member-date-row">
           <Select aria-label="日期模式" value={memberForm.dateChoice} onChange={(event) => onChange("dateChoice", event.target.value)}>
@@ -171,17 +172,15 @@ function MemberFormFields({ instance, memberForm, onChange }) {
 
 export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
   const [members, setMembers] = useState([]);
+  const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingMember, setEditingMember] = useState(null);
-  const [memberForm, setMemberForm] = useState({ ...EMPTY_MEMBER_FORM });
+  const [memberForm, setMemberForm] = useState({ userId: "" });
   const [formErrorMessage, setFormErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
   const [isActing, setIsActing] = useState(false);
-  const [generatedAccess, setGeneratedAccess] = useState(null);
-  const [revealedAccessKeys, setRevealedAccessKeys] = useState({});
-  const [loadingKeyMemberId, setLoadingKeyMemberId] = useState(null);
   const [togglingMemberId, setTogglingMemberId] = useState(null);
   const instanceId = instance?.id;
   const membersPath = `/api/admin/instances/${instanceId}/members`;
@@ -189,8 +188,12 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
   async function loadMembers() {
     setIsLoading(true);
     try {
-      const responsePayload = await requestJson(membersPath);
-      setMembers(responsePayload.data.members);
+      const [membersResponse, usersResponse] = await Promise.all([
+        requestJson(membersPath),
+        requestJson("/api/admin/users"),
+      ]);
+      setMembers(membersResponse.data.members);
+      setUsers(usersResponse.data.users);
     } catch (error) {
       showToast(error?.message || "读取访问成员失败", { type: "error" });
     } finally {
@@ -203,7 +206,6 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
       return;
     }
     setMembers([]);
-    setRevealedAccessKeys({});
     loadMembers();
   }, [instanceId]);
 
@@ -211,17 +213,9 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
     await Promise.all([loadMembers(), onChanged()]);
   }
 
-  function forgetRevealedAccessKey(memberId) {
-    setRevealedAccessKeys((currentKeys) => {
-      const remainingKeys = { ...currentKeys };
-      delete remainingKeys[memberId];
-      return remainingKeys;
-    });
-  }
-
-  function openCreateForm() {
+  function openBindingForm() {
     setEditingMember(null);
-    setMemberForm({ ...EMPTY_MEMBER_FORM });
+    setMemberForm({ userId: "" });
     setFormErrorMessage("");
     setIsFormOpen(true);
   }
@@ -239,25 +233,39 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
 
   async function saveMember(event) {
     event.preventDefault();
+    if (!editingMember && !memberForm.userId) {
+      return;
+    }
     setFormErrorMessage("");
     setIsSaving(true);
     try {
-      const responsePayload = await requestJson(
-        editingMember ? `${membersPath}/${editingMember.id}` : membersPath,
-        {
-          method: editingMember ? "PATCH" : "POST",
-          body: JSON.stringify(createMemberRequestBody(memberForm, editingMember?.enabled ?? true)),
-        },
-      );
-      setIsFormOpen(false);
       if (editingMember) {
+        const responsePayload = await requestJson(`${membersPath}/${editingMember.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(createMemberRequestBody(memberForm, editingMember.enabled)),
+        });
         showToast(`成员“${responsePayload.data.member.name}”已更新`, { type: "success" });
       } else {
-        setGeneratedAccess({ ...responsePayload.data, isNewMember: true });
+        const userId = Number(memberForm.userId);
+        const baseName = `user-${userId}`;
+        const reservedNames = new Set([
+          instance.namePrefix,
+          ...members.flatMap((member) => [member.name, member.namePrefix]),
+        ]);
+        let name = baseName;
+        for (let suffix = 2; reservedNames.has(name); suffix += 1) {
+          name = `${baseName}-${suffix}`;
+        }
+        await requestJson(membersPath, {
+          method: "POST",
+          body: JSON.stringify({ name, namePrefix: name, userId }),
+        });
+        showToast("用户已绑定到此实例", { type: "success" });
       }
+      setIsFormOpen(false);
       await refreshAfterChange();
     } catch (error) {
-      setFormErrorMessage(error?.message || "保存成员失败");
+      setFormErrorMessage(error?.message || (editingMember ? "保存成员失败" : "绑定用户失败"));
     } finally {
       setIsSaving(false);
     }
@@ -270,7 +278,7 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
         method: "PATCH",
         body: JSON.stringify(createMemberRequestBody(createMemberFormFromMember(member), !member.enabled)),
       });
-      showToast(member.enabled ? `已停用“${member.name}”，其访客会话已失效` : `已启用“${member.name}”`, { type: "success" });
+      showToast(member.enabled ? `已停用“${member.name}”，该账号不能再访问此实例` : `已启用“${member.name}”`, { type: "success" });
       await refreshAfterChange();
     } catch (error) {
       showToast(error?.message || "更新成员状态失败", { type: "error" });
@@ -280,20 +288,11 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
   }
 
   async function confirmPendingAction() {
-    const { type, member } = pendingAction;
+    const member = pendingAction;
     setIsActing(true);
     try {
-      if (type === "delete") {
-        await requestJson(`${membersPath}/${member.id}`, { method: "DELETE" });
-        showToast(`成员“${member.name}”已删除`, { type: "success" });
-      } else {
-        const responsePayload = await requestJson(`${membersPath}/${member.id}/access-key`, {
-          method: "POST",
-          body: "{}",
-        });
-        setGeneratedAccess({ member, accessKey: responsePayload.data.accessKey, isNewMember: false });
-      }
-      forgetRevealedAccessKey(member.id);
+      await requestJson(`${membersPath}/${member.id}`, { method: "DELETE" });
+      showToast(`成员“${member.name}”已删除`, { type: "success" });
       setPendingAction(null);
       await refreshAfterChange();
     } catch (error) {
@@ -303,59 +302,25 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
     }
   }
 
-  async function loadAccessKey(member) {
-    if (revealedAccessKeys[member.id]) {
-      return revealedAccessKeys[member.id];
-    }
-    setLoadingKeyMemberId(member.id);
-    try {
-      const responsePayload = await requestJson(`${membersPath}/${member.id}/access-key/reveal`, {
-        method: "POST",
-        body: "{}",
-      });
-      const accessKey = responsePayload.data.accessKey;
-      setRevealedAccessKeys((currentKeys) => ({ ...currentKeys, [member.id]: accessKey }));
-      return accessKey;
-    } catch (error) {
-      showToast(error?.message || "读取访问 Key 失败", { type: "error" });
-      return null;
-    } finally {
-      setLoadingKeyMemberId(null);
-    }
-  }
-
-  async function copyAccessKey(accessKey) {
-    if (!accessKey) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(accessKey);
-      showToast("完整访问 Key 已复制", { type: "success" });
-    } catch {
-      showToast("复制访问 Key 失败，请检查浏览器权限", { type: "error" });
-    }
-  }
-
   if (!instance) {
     return null;
   }
-  const isPendingDelete = pendingAction?.type === "delete";
 
   return (
     <>
       <Sheet
         open
         title="访问成员"
-        description={`${instance.name} · 每个成员持有独立的访问 Key 和渠道前缀，只能看到自己导入的渠道。`}
+        description={`${instance.name} · 管理该实例的用户访问、成员渠道前缀和导入记录归属。`}
         onClose={onClose}
         footer={(
           <>
             <button className="btn btn-outline" type="button" onClick={onClose}>
               关闭
             </button>
-            <button className="btn btn-primary" type="button" onClick={openCreateForm}>
+            <button className="btn btn-primary" type="button" onClick={openBindingForm} disabled={isLoading}>
               <Plus size={15} aria-hidden="true" />
-              新增成员
+              绑定用户
             </button>
           </>
         )}
@@ -367,13 +332,13 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
         <div className="member-list" aria-busy={isLoading}>
           {members.map((member) => {
             const resolvedDefaults = resolveMemberDefaults(instance, member);
-            const revealedKey = revealedAccessKeys[member.id];
             return (
               <article className={`member-card ${member.enabled ? "" : "is-disabled"}`} key={member.id} aria-label={`成员 ${member.name}`}>
                 <div className="member-card-head">
                   <div className="cell-stack">
                     <strong>{member.name}</strong>
                     <span className="cell-mono">{formatChannelNamePattern(resolvedDefaults)}</span>
+                    <span>{users.find((user) => user.id === member.userId)?.username ?? "未绑定用户"}</span>
                   </div>
                   <div className="row-actions">
                     <Switch
@@ -387,15 +352,10 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
                       items={[
                         { label: "编辑成员", icon: Pencil, onSelect: () => openEditForm(member) },
                         {
-                          label: "重新生成访问 Key",
-                          icon: KeyRound,
-                          onSelect: () => setPendingAction({ type: "regenerate", member }),
-                        },
-                        {
                           label: "删除成员",
                           icon: Trash2,
                           danger: true,
-                          onSelect: () => setPendingAction({ type: "delete", member }),
+                          onSelect: () => setPendingAction(member),
                         },
                       ]}
                     />
@@ -423,38 +383,6 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
                     <dd>{member.enabled ? "可进入" : "已停用"}</dd>
                   </div>
                 </dl>
-                <div className="key-cell member-key">
-                  <KeyRound size={14} aria-hidden="true" />
-                  <span className="cell-mono key-value">{revealedKey || member.accessKey.mask || "未生成"}</span>
-                  {member.accessKey.revealable ? (
-                    <>
-                      <button
-                        className="btn btn-ghost btn-icon btn-xs"
-                        type="button"
-                        title={revealedKey ? "隐藏访问 Key" : "显示访问 Key"}
-                        aria-label={revealedKey ? `隐藏 ${member.name} 的访问 Key` : `显示 ${member.name} 的访问 Key`}
-                        disabled={loadingKeyMemberId === member.id}
-                        onClick={() => (revealedKey ? forgetRevealedAccessKey(member.id) : loadAccessKey(member))}
-                      >
-                        {revealedKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-icon btn-xs"
-                        type="button"
-                        title="复制访问 Key"
-                        aria-label={`复制 ${member.name} 的访问 Key`}
-                        disabled={loadingKeyMemberId === member.id}
-                        onClick={async () => copyAccessKey(await loadAccessKey(member))}
-                      >
-                        <Copy size={14} />
-                      </button>
-                    </>
-                  ) : member.accessKey.configured ? (
-                    <span className="tag tag-muted" title="该访问 Key 生成于加密保存之前，重新生成一次后即可随时查看">
-                      重新生成后可查看
-                    </span>
-                  ) : null}
-                </div>
               </article>
             );
           })}
@@ -466,11 +394,11 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
           <EmptyState
             icon={Users}
             title="还没有访问成员"
-            description="为每位使用者新增一个成员，分别发放访问 Key，并让他们的渠道使用各自的名称前缀。"
+            description="选择已有用户即可授予此实例的访问和推送权限。"
             action={(
-              <button className="btn btn-primary" type="button" onClick={openCreateForm}>
+              <button className="btn btn-primary" type="button" onClick={openBindingForm}>
                 <Plus size={15} aria-hidden="true" />
-                新增成员
+                绑定用户
               </button>
             )}
           />
@@ -479,10 +407,11 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
 
       <Modal
         open={isFormOpen}
-        title={editingMember ? "编辑成员" : "新增成员"}
+        title={editingMember ? "编辑成员" : "绑定用户"}
+        size={editingMember ? "md" : "sm"}
         description={editingMember
           ? "修改后对之后导入的渠道生效，已创建的渠道不会改名。"
-          : "保存后会生成该成员专属的访问 Key。"}
+          : `选择可访问和推送到「${instance.name}」的用户。`}
         closeDisabled={isSaving}
         closeOnBackdrop={false}
         onClose={() => setIsFormOpen(false)}
@@ -492,67 +421,57 @@ export default function InstanceMembersSheet({ instance, onClose, onChanged }) {
             <button className="btn btn-outline" type="button" disabled={isSaving} onClick={() => setIsFormOpen(false)}>
               取消
             </button>
-            <button className="btn btn-primary" disabled={isSaving}>
+            <button className="btn btn-primary" disabled={isSaving || (!editingMember && !memberForm.userId)}>
               {isSaving ? <Spinner /> : null}
-              {isSaving ? "正在保存..." : editingMember ? "保存修改" : "创建并生成 Key"}
+              {isSaving ? "正在保存..." : editingMember ? "保存修改" : "确认绑定"}
             </button>
           </>
         )}
       >
-        <MemberFormFields instance={instance} memberForm={memberForm} onChange={updateMemberForm} />
+        {editingMember ? (
+          <MemberFormFields instance={instance} memberForm={memberForm} onChange={updateMemberForm}
+            editingMember={editingMember} members={members} users={users} />
+        ) : (
+          <Field label="选择用户" hint={users.length === 0 ? "请先在用户管理中创建普通用户。" : undefined}>
+            <Select required disabled={isSaving} value={memberForm.userId}
+              onChange={(event) => updateMemberForm("userId", event.target.value)}>
+              <option value="" disabled>请选择用户</option>
+              {users.map((user) => {
+                const boundMember = members.find((member) => member.userId === user.id);
+                const statusLabel = !user.enabled ? "（账号已停用）"
+                  : boundMember?.enabled ? "（已绑定）"
+                    : boundMember ? "（在成员列表恢复访问）" : "";
+                return (
+                  <option key={user.id} value={user.id} disabled={!user.enabled || Boolean(boundMember)}>
+                    {user.username}{statusLabel}
+                  </option>
+                );
+              })}
+            </Select>
+          </Field>
+        )}
         {formErrorMessage ? <p className="form-error">{formErrorMessage}</p> : null}
       </Modal>
 
       <ConfirmDialog
         open={Boolean(pendingAction)}
-        title={isPendingDelete ? "删除成员？" : "重新生成访问 Key？"}
-        confirmLabel={isPendingDelete ? "确认删除" : "确认重新生成"}
-        tone={isPendingDelete ? "danger" : "primary"}
+        title="删除成员？"
+        confirmLabel="确认删除"
+        tone="danger"
         isBusy={isActing}
         onConfirm={confirmPendingAction}
         onCancel={() => setPendingAction(null)}
       >
         <p>
-          {isPendingDelete
-            ? `删除“${pendingAction?.member.name}”后，其访问 Key 和访客会话立即失效。`
-            : `重新生成后，“${pendingAction?.member.name}”的旧访问 Key 和现有访客会话将立即失效。`}
+          删除“{pendingAction?.name}”后，绑定账号将失去该实例的访问权限。
         </p>
-        {isPendingDelete && pendingAction?.member.channelRecordCount > 0 ? (
+        {pendingAction?.channelRecordCount > 0 ? (
           <p className="callout callout-warning">
-            已导入的 {pendingAction.member.channelRecordCount} 条渠道记录会保留，之后只有管理员能在 Key 记录中看到。
+            已导入的 {pendingAction.channelRecordCount} 条渠道记录会保留，之后只有管理员能在 Key 记录中看到。
           </p>
         ) : null}
       </ConfirmDialog>
 
-      <Modal
-        open={Boolean(generatedAccess)}
-        title={generatedAccess?.isNewMember ? "成员已创建" : "访问 Key 已重新生成"}
-        description={generatedAccess ? `成员：${generatedAccess.member.name}` : undefined}
-        size="sm"
-        closeOnBackdrop={false}
-        onClose={() => setGeneratedAccess(null)}
-        footer={(
-          <>
-            <button className="btn btn-outline" type="button" onClick={() => setGeneratedAccess(null)}>
-              完成
-            </button>
-            <button className="btn btn-primary" type="button" onClick={() => copyAccessKey(generatedAccess?.accessKey)}>
-              <Copy size={15} aria-hidden="true" />
-              复制 Key
-            </button>
-          </>
-        )}
-      >
-        <div className="secret-box">
-          <ShieldCheck size={16} aria-hidden="true" />
-          <code>{generatedAccess?.accessKey}</code>
-        </div>
-        <p className="callout callout-info">
-          {generatedAccess?.isNewMember
-            ? "把这个 Key 发给该成员即可。Key 已加密保存，之后可在成员列表中随时查看或复制。"
-            : "旧 Key 和该成员现有的访客会话已失效，请把新 Key 发给该成员。"}
-        </p>
-      </Modal>
     </>
   );
 }

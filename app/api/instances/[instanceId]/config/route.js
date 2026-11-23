@@ -15,10 +15,7 @@ export async function GET(request, { params }) {
   const context = getRuntimeContext();
   const { instanceId } = await params;
   try {
-    const { instance, principal } = requireInstanceAccess(request, instanceId);
-    const member = principal.kind === "visitor"
-      ? context.store.getInstanceMember(principal.memberId)
-      : null;
+    const { instance, member } = requireInstanceAccess(request, instanceId);
     const { adminUsername, memberCount, activeMemberCount, ...accessibleInstance } = instance;
     const channelDefaults = resolveChannelDefaults(instance, member);
     return jsonResponse({

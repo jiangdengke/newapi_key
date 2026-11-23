@@ -22,6 +22,7 @@ export async function GET(request, { params }) {
     const instanceRuntime = getInstanceRuntime(instanceId);
     await getInstanceAuthenticatedUser(instanceRuntime);
     const groups = await instanceRuntime.client.listAvailableGroups();
+    requireInstanceAccess(request, instanceId);
 
     return jsonResponse({
       success: true,

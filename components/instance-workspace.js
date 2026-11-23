@@ -191,7 +191,6 @@ export default function InstanceWorkspace({
   instanceId,
   view,
   onViewChange,
-  isAdministrator,
   onBack,
 }) {
   const [configuration, setConfiguration] = useState(null);
@@ -666,12 +665,12 @@ export default function InstanceWorkspace({
     return () => window.clearInterval(intervalId);
   }, [isAutomaticSynchronizationEnabled]);
 
-  const backButton = isAdministrator ? (
+  const backButton = (
     <button className="btn btn-ghost btn-sm back-button" type="button" onClick={onBack}>
       <ArrowLeft size={14} aria-hidden="true" />
       返回实例列表
     </button>
-  ) : null;
+  );
 
   if (!configuration) {
     return (
@@ -746,14 +745,12 @@ export default function InstanceWorkspace({
             <StatusText status={instance.enabled ? "enabled" : "disabled"}>
               {instance.enabled ? "实例已启用" : "实例已停用"}
             </StatusText>
-            {isAdministrator ? (
-              <Segmented
-                options={WORKSPACE_VIEW_OPTIONS}
-                value={view}
-                onChange={onViewChange}
-                ariaLabel="切换工作区页面"
-              />
-            ) : null}
+            <Segmented
+              options={WORKSPACE_VIEW_OPTIONS}
+              value={view}
+              onChange={onViewChange}
+              ariaLabel="切换工作区页面"
+            />
           </>
         )}
       />

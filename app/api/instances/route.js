@@ -24,7 +24,7 @@ export async function GET(request) {
     const principal = requireAuthenticatedPrincipal(request);
     const storedInstances = principal.kind === "admin"
       ? context.store.listInstances()
-      : [context.store.getInstance(principal.instanceId)].filter(Boolean);
+      : context.store.listAccessibleUserInstances(principal.id);
     const instances = storedInstances.map(createAccessibleInstance);
     return jsonResponse({ success: true, data: { instances } }, { requestId });
   } catch (error) {

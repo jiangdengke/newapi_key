@@ -5,16 +5,17 @@ import { DELETE as deleteAdminInstance } from "../app/api/admin/instances/[insta
 import { GET as getAdminInstances } from "../app/api/admin/instances/route.js";
 import { GET as listMembers, POST as createMember } from "../app/api/admin/instances/[instanceId]/members/route.js";
 import { DELETE as deleteMember, PATCH as updateMember } from "../app/api/admin/instances/[instanceId]/members/[memberId]/route.js";
-import { POST as regenerateMemberKey } from "../app/api/admin/instances/[instanceId]/members/[memberId]/access-key/route.js";
-import { POST as revealMemberKey } from "../app/api/admin/instances/[instanceId]/members/[memberId]/access-key/reveal/route.js";
 import { DELETE as deleteAdministratorRecords } from "../app/api/admin/records/route.js";
 import { POST as queryAdministratorRecords } from "../app/api/admin/records/query/route.js";
 import { POST as revealAdministratorRecordKey } from "../app/api/admin/records/[recordId]/key/route.js";
-import { POST as loginWithAccessKey } from "../app/api/access/login/route.js";
+import { GET as listUsers, PATCH as updateUser, POST as createUser } from "../app/api/admin/users/route.js";
+import { POST as loginWithPassword } from "../app/api/auth/login/route.js";
 import { GET as getInstanceConfiguration } from "../app/api/instances/[instanceId]/config/route.js";
 import { POST as queryInstanceRecords } from "../app/api/instances/[instanceId]/records/query/route.js";
+import { GET as listAccessibleInstances } from "../app/api/instances/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
 import { SESSION_COOKIE_NAME } from "../lib/http.js";
+import { createMemberAccountSession } from "./account-fixtures.js";
 
 const RUNTIME_CONTEXT_KEY = Symbol.for("newapi-key.runtime-context");
 const ADMINISTRATOR_PASSWORD = "administrator-password";
@@ -120,7 +121,7 @@ function installTestRuntimeContext(store) {
   };
 }
 
-test("route handlers isolate visitor instances and preserve administrator access", async () => {
+test("route handlers isolate ordinary users and preserve administrator access", async () => {
   const store = new ApplicationStore({
     databasePath: ":memory:",
     encryptionKey: Buffer.alloc(32, 7),
@@ -145,9 +146,7 @@ test("route handlers isolate visitor instances and preserve administrator access
     );
     const administratorSession = store.createAdministratorSession(administrator.id);
     const generatedAccess = store.createInstanceMember(firstInstance.id, { name: "测试成员" });
-    const visitorSession = store.createVisitorSessionForAccessKey(
-      generatedAccess.accessKey,
-    );
+    const visitorSession = createMemberAccountSession(store, [generatedAccess.member.id]);
 
     const anonymousResponse = await getInstanceConfiguration(
       new Request(`http://localhost/api/instances/${firstInstance.id}/config`),
@@ -203,7 +202,7 @@ test("route handlers isolate visitor instances and preserve administrator access
       ),
       createRouteContext(firstInstance.id),
     );
-    assert.equal(disabledInstanceResponse.status, 401);
+    assert.equal(disabledInstanceResponse.status, 403);
 
     const administratorDisabledInstanceResponse = await getInstanceConfiguration(
       createAuthenticatedRequest(
@@ -219,7 +218,7 @@ test("route handlers isolate visitor instances and preserve administrator access
   }
 });
 
-test("access key login creates an instance-bound visitor session", async () => {
+test("administrator provisions a multi-instance account and can revoke its sessions", async () => {
   const store = new ApplicationStore({
     databasePath: ":memory:",
     encryptionKey: Buffer.alloc(32, 9),
@@ -232,33 +231,83 @@ test("access key login creates an instance-bound visitor session", async () => {
   const restoreRuntimeContext = installTestRuntimeContext(store);
 
   try {
-    const instance = store.createInstance(
-      createInstanceInput("first", "https://first.example.com"),
-    );
-    const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const response = await loginWithAccessKey(new Request(
-      "http://localhost/api/access/login",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Host: "localhost",
-        },
-        body: JSON.stringify({ accessKey: generatedAccess.accessKey }),
-      },
+    const instances = ["first", "second", "third"].map((name) => (
+      store.createInstance(createInstanceInput(name, `https://${name}.example.com`))
     ));
-
-    assert.equal(response.status, 200);
-    const responsePayload = await response.json();
-    assert.deepEqual(responsePayload.data.principal, {
-      kind: "visitor",
-      instanceId: instance.id,
-      instanceName: instance.name,
-      memberId: generatedAccess.member.id,
-      memberName: "测试成员",
+    const administrator = store.authenticateAdministrator("system-administrator", ADMINISTRATOR_PASSWORD);
+    const administratorToken = store.createAdministratorSession(administrator.id).token;
+    const usersPath = "/api/admin/users";
+    const userInput = {
+      username: "ordinary-user",
+      password: "ordinary-password",
+      enabled: true,
+      instanceIds: [instances[0].id, instances[1].id],
+      role: "admin",
+    };
+    const saveRequest = (sessionToken, body, method = "PATCH") => new Request(`http://localhost${usersPath}`, {
+      method,
+      headers: { "Content-Type": "application/json", Cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`, Host: "localhost", Origin: "http://localhost" },
+      body: JSON.stringify(body),
     });
+    const login = (password) => loginWithPassword(createAuthenticatedPostRequest("/api/auth/login", "", { username: userInput.username, password }));
+    assert.equal((await listUsers(createAuthenticatedRequest(usersPath, ""))).status, 401);
+    assert.equal((await createUser(saveRequest(administratorToken, userInput, "POST"))).status, 201);
+    assert.equal(store.getInstance(instances[0].id).activeMemberCount, 1);
+    const administratorUserList = await listUsers(createAuthenticatedRequest(usersPath, administratorToken));
+    const administratorUserPayload = await administratorUserList.json();
+    assert.deepEqual(administratorUserPayload.data.instances.map(({ id }) => id), instances.map(({ id }) => id));
+    assert.deepEqual(administratorUserPayload.data.users[0].instanceIds, userInput.instanceIds);
+    assert.equal((await createUser(saveRequest(administratorToken, { ...userInput, username: "other-account", instanceIds: [instances[0].id] }, "POST"))).status, 201);
+    assert.equal(store.getInstance(instances[0].id).activeMemberCount, 2);
+    assert.equal((await createUser(saveRequest(administratorToken, {
+      ...userInput,
+      username: "duplicate-instance",
+      instanceIds: [instances[0].id, instances[0].id],
+    }, "POST"))).status, 400);
+    const assignedUser = store.listOrdinaryUsers().find((user) => user.username === userInput.username);
+    const assignedMembers = instances.slice(0, 2).map((instance) => (
+      store.listInstanceMembers(instance.id).find((member) => member.userId === assignedUser.id)
+    ));
+    assert.ok(assignedMembers.every(Boolean));
+
+    const response = await login(userInput.password);
+    assert.equal(response.status, 200);
+    const { data: { principal } } = await response.json();
+    assert.equal(principal.kind, "user");
+    assert.equal(principal.username, userInput.username);
     assert.match(response.headers.get("set-cookie"), /HttpOnly/);
-    assert.equal(response.headers.get("set-cookie").includes(generatedAccess.accessKey), false);
+    const loginToken = (loginResponse) => loginResponse.headers.get("set-cookie").split(";")[0].slice(SESSION_COOKIE_NAME.length + 1);
+    const token = loginToken(response);
+    assert.equal((await listUsers(createAuthenticatedRequest(usersPath, token))).status, 403);
+    assert.equal((await updateUser(saveRequest(token, { ...userInput, id: principal.id }))).status, 403);
+    assert.equal((await updateUser(saveRequest(administratorToken, { ...userInput, id: administrator.id }))).status, 404);
+    const instancesResponse = await listAccessibleInstances(createAuthenticatedRequest("/api/instances", token));
+    assert.deepEqual((await instancesResponse.json()).data.instances.map(({ id }) => id), [instances[0].id, instances[1].id]);
+    const getConfig = (instanceId, sessionToken = token) => getInstanceConfiguration(
+      createAuthenticatedRequest(`/api/instances/${instanceId}/config`, sessionToken), createRouteContext(instanceId),
+    );
+    assert.equal((await getConfig(instances[0].id)).status, 200);
+    assert.equal((await getConfig(instances[1].id)).status, 200);
+    assert.equal((await getConfig(instances[2].id)).status, 403);
+
+    const adjustedUser = { ...userInput, id: principal.id, password: "", instanceIds: [instances[1].id] };
+    assert.equal((await updateUser(saveRequest(administratorToken, adjustedUser))).status, 200);
+    assert.equal((await getConfig(instances[0].id)).status, 403);
+    assert.equal((await getConfig(instances[1].id)).status, 200);
+    const newPassword = "replacement-password";
+    assert.equal((await updateUser(saveRequest(administratorToken, { ...adjustedUser, password: newPassword }))).status, 200);
+    assert.equal((await getConfig(instances[1].id)).status, 401);
+    assert.equal((await login(userInput.password)).status, 401);
+    const newLogin = await login(newPassword);
+    assert.equal(newLogin.status, 200);
+    const newToken = loginToken(newLogin);
+    assert.equal((await updateUser(saveRequest(administratorToken, { ...adjustedUser, enabled: false }))).status, 200);
+    assert.equal((await getConfig(instances[1].id, newToken)).status, 401);
+    assert.equal((await login(newPassword)).status, 401);
+    const userList = (await (await listUsers(createAuthenticatedRequest(usersPath, administratorToken))).json()).data.users;
+    const savedUser = userList.find(({ id }) => id === principal.id);
+    assert.deepEqual(savedUser.instanceIds, [instances[1].id]);
+    assert.equal(savedUser.memberIds.length, 2);
   } finally {
     restoreRuntimeContext();
     store.close();
@@ -304,7 +353,7 @@ test("only administrators can delete local instance data", async () => {
     );
     const administratorSession = store.createAdministratorSession(administrator.id);
     const visitorAccess = store.createInstanceMember(firstInstance.id, { name: "测试成员" });
-    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
+    const visitorSession = createMemberAccountSession(store, [visitorAccess.member.id]);
     const routeContext = createRouteContext(firstInstance.id);
 
     const anonymousResponse = await deleteAdminInstance(
@@ -334,7 +383,7 @@ test("only administrators can delete local instance data", async () => {
     assert.equal(responsePayload.data.instanceId, firstInstance.id);
     assert.equal(responsePayload.data.deletedChannelRecordCount, 1);
     assert.equal(store.getInstance(firstInstance.id), null);
-    assert.equal(store.getPrincipalBySessionToken(visitorSession.token), null);
+    assert.equal(store.getPrincipalBySessionToken(visitorSession.token).kind, "user");
     assert.equal(store.getInstance(secondInstance.id).id, secondInstance.id);
 
     const repeatedResponse = await deleteAdminInstance(
@@ -406,7 +455,7 @@ test("administrator can query masked records across instances", async () => {
     );
     const administratorSession = store.createAdministratorSession(administrator.id);
     const visitorAccess = store.createInstanceMember(firstInstance.id, { name: "测试成员" });
-    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
+    const visitorSession = createMemberAccountSession(store, [visitorAccess.member.id]);
 
     const response = await queryAdministratorRecords(
       createAuthenticatedPostRequest(
@@ -501,7 +550,7 @@ test("only administrators can delete selected local records", async () => {
     );
     const administratorSession = store.createAdministratorSession(administrator.id);
     const visitorAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
+    const visitorSession = createMemberAccountSession(store, [visitorAccess.member.id]);
 
     const anonymousResponse = await deleteAdministratorRecords(
       createDeleteJsonRequest("/api/admin/records", null, {
@@ -588,7 +637,7 @@ test("only administrators can reveal complete imported keys", async () => {
     );
     const administratorSession = store.createAdministratorSession(administrator.id);
     const visitorAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
+    const visitorSession = createMemberAccountSession(store, [visitorAccess.member.id]);
     const routeContext = createRecordRouteContext(record.id);
 
     const anonymousResponse = await revealAdministratorRecordKey(
@@ -711,7 +760,7 @@ test("record queries filter, sort and count facets within the caller's scope", a
       { value: secondInstance.id, count: 1 },
     ]);
 
-    const visitorSession = store.createVisitorSessionForAccessKey(firstMember.accessKey);
+    const visitorSession = createMemberAccountSession(store, [firstMember.member.id]);
     const visitorResponse = await queryInstanceRecords(
       createAuthenticatedPostRequest(`/api/instances/${firstInstance.id}/records/query`, visitorSession.token, {
         search: "claude-001",
@@ -737,7 +786,7 @@ test("record queries filter, sort and count facets within the caller's scope", a
   }
 });
 
-test("administrators manage instance members and their access keys", async () => {
+test("administrators manage instance members without issuing legacy access keys", async () => {
   const store = new ApplicationStore({
     databasePath: ":memory:",
     encryptionKey: Buffer.alloc(32, 10),
@@ -749,6 +798,13 @@ test("administrators manage instance members and their access keys", async () =>
   try {
     const instance = store.createInstance(createInstanceInput("first", "https://first.example.com"));
     const otherInstance = store.createInstance(createInstanceInput("second", "https://second.example.com"));
+    store.saveOrdinaryUser(null, {
+      username: "instance-member-user",
+      password: "instance-member-password",
+      enabled: true,
+      instanceIds: [],
+    });
+    const account = store.authenticateAccount("instance-member-user", "instance-member-password");
     const administrator = store.authenticateAdministrator("system-administrator", ADMINISTRATOR_PASSWORD);
     const administratorToken = store.createAdministratorSession(administrator.id).token;
     const membersPath = `/api/admin/instances/${instance.id}/members`;
@@ -760,6 +816,7 @@ test("administrators manage instance members and their access keys", async () =>
       createAuthenticatedPostRequest(membersPath, administratorToken, {
         name: "张三",
         namePrefix: "zhangsan",
+        userId: account.id,
         dateMode: "",
         priority: 7,
       }),
@@ -771,7 +828,7 @@ test("administrators manage instance members and their access keys", async () =>
     assert.equal(member.dateMode, "");
     assert.equal(member.priority, 7);
     assert.equal(member.weight, null);
-    assert.match(accessKey, /^nai_[A-Za-z0-9_-]{43}$/);
+    assert.equal(accessKey, undefined);
 
     const duplicatePrefixResponse = await createMember(
       createAuthenticatedPostRequest(membersPath, administratorToken, { name: "李四", namePrefix: "zhangsan" }),
@@ -785,40 +842,34 @@ test("administrators manage instance members and their access keys", async () =>
     );
     assert.equal(invalidResponse.status, 400);
 
-    const visitorToken = store.createVisitorSessionForAccessKey(accessKey).token;
+    const visitorMember = store.createInstanceMember(instance.id, {
+      name: "访客成员",
+      namePrefix: "visitor-member",
+    }).member;
+    const visitorToken = createMemberAccountSession(store, [visitorMember.id]).token;
     assert.equal((await listMembers(createAuthenticatedRequest(membersPath, visitorToken), createRouteContext(instance.id))).status, 403);
-    assert.equal((await revealMemberKey(
-      createAuthenticatedPostRequest(`${membersPath}/${member.id}/access-key/reveal`, visitorToken, {}),
-      routeContext(member.id),
-    )).status, 403);
-
-    const revealResponse = await revealMemberKey(
-      createAuthenticatedPostRequest(`${membersPath}/${member.id}/access-key/reveal`, administratorToken, {}),
-      routeContext(member.id),
-    );
-    assert.equal((await revealResponse.json()).data.accessKey, accessKey);
-    const crossInstanceResponse = await revealMemberKey(
-      createAuthenticatedPostRequest(`/api/admin/instances/${otherInstance.id}/members/${member.id}/access-key/reveal`, administratorToken, {}),
+    const crossInstanceResponse = await deleteMember(
+      createDeleteRequest(`/api/admin/instances/${otherInstance.id}/members/${member.id}`, administratorToken),
       routeContext(member.id, otherInstance.id),
     );
     assert.equal(crossInstanceResponse.status, 404);
 
     const listResponse = await listMembers(createAuthenticatedRequest(membersPath, administratorToken), createRouteContext(instance.id));
-    assert.deepEqual((await listResponse.json()).data.members.map((listedMember) => listedMember.name), ["张三"]);
+    assert.deepEqual((await listResponse.json()).data.members.map((listedMember) => listedMember.name), ["张三", "访客成员"]);
 
-    const regenerateResponse = await regenerateMemberKey(
-      createAuthenticatedPostRequest(`${membersPath}/${member.id}/access-key`, administratorToken, {}),
-      routeContext(member.id),
-    );
-    const regeneratedKey = (await regenerateResponse.json()).data.accessKey;
-    assert.notEqual(regeneratedKey, accessKey);
-    assert.equal(store.getPrincipalBySessionToken(visitorToken), null);
+    const accountToken = store.createAccountSession(account.id).token;
+    assert.equal((await getInstanceConfiguration(
+      createAuthenticatedRequest(`/api/instances/${instance.id}/config`, accountToken), createRouteContext(instance.id),
+    )).status, 200);
+    assert.equal((await getInstanceConfiguration(
+      createAuthenticatedRequest(`/api/instances/${otherInstance.id}/config`, accountToken), createRouteContext(otherInstance.id),
+    )).status, 403);
 
     const patchResponse = await updateMember(
       new Request(`http://localhost${membersPath}/${member.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(administratorToken)}`, Host: "localhost" },
-        body: JSON.stringify({ name: "张三", namePrefix: "zs", dateMode: null, weight: 3, enabled: false }),
+        body: JSON.stringify({ name: "张三", namePrefix: "zs", userId: null, dateMode: null, weight: 3, enabled: false }),
       }),
       routeContext(member.id),
     );
@@ -827,7 +878,9 @@ test("administrators manage instance members and their access keys", async () =>
     assert.equal(patchedMember.dateMode, null);
     assert.equal(patchedMember.priority, null);
     assert.equal(patchedMember.enabled, false);
-    assert.equal(store.createVisitorSessionForAccessKey(regeneratedKey), null);
+    assert.equal((await getInstanceConfiguration(
+      createAuthenticatedRequest(`/api/instances/${instance.id}/config`, accountToken), createRouteContext(instance.id),
+    )).status, 403);
 
     const deleteResponse = await deleteMember(
       createDeleteRequest(`${membersPath}/${member.id}`, administratorToken),
@@ -862,7 +915,7 @@ test("members only see records they imported; administrators can filter by membe
       instanceId: instance.id, memberId: secondMember.member.id, baseUrl: instance.baseUrl, key: "sk-lisi-0000000001",
       quotaPerUnit: 500_000, channel: { id: 2, name: "lisi-001", type: 14, status: 1, used_quota: 0, models: "m", group: "g" },
     });
-    const visitorToken = store.createVisitorSessionForAccessKey(firstMember.accessKey).token;
+    const visitorToken = createMemberAccountSession(store, [firstMember.member.id]).token;
     const visitorResponse = await queryInstanceRecords(
       createAuthenticatedPostRequest(`/api/instances/${instance.id}/records/query`, visitorToken, {}),
       createRouteContext(instance.id),

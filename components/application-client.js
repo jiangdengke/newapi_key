@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { FileInput, History, KeyRound, Server, ShieldCheck } from "lucide-react";
+import { KeyRound, Rocket, Server, ShieldCheck, Users } from "lucide-react";
 
 import { requestJson } from "../lib/client-api.js";
 import { showToast } from "../lib/toast.js";
@@ -9,23 +9,21 @@ import AccessGateway from "./access-gateway.js";
 import AccountSecurity from "./account-security.js";
 import AdminInstances from "./admin-instances.js";
 import AdminRecordsOverview from "./admin-records-overview.js";
+import AdminUsers from "./admin-users.js";
 import AppShell from "./app-shell.js";
+import ChannelPublisher from "./channel-publisher.js";
 import InstanceWorkspace from "./instance-workspace.js";
-import { Spinner } from "./ui.js";
+import { EmptyState, Spinner } from "./ui.js";
 
-const ADMINISTRATOR_PAGES = new Set(["instances", "records", "security"]);
+const ADMINISTRATOR_PAGES = new Set(["instances", "users", "records", "security"]);
 
 function readRouteSegments() {
   return window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
 }
 
 function parseRoute(principal, routeSegments) {
-  if (principal.kind === "visitor") {
-    return {
-      page: "workspace",
-      instanceId: principal.instanceId,
-      workspaceView: routeSegments[0] === "records" ? "records" : "import",
-    };
+  if (routeSegments[0] === "publish") {
+    return { page: "publish" };
   }
   if (routeSegments[0] === "instances" && routeSegments[1]) {
     const instanceId = Number(routeSegments[1]);
@@ -38,7 +36,7 @@ function parseRoute(principal, routeSegments) {
     }
   }
   return {
-    page: ADMINISTRATOR_PAGES.has(routeSegments[0]) ? routeSegments[0] : "instances",
+    page: principal.kind === "admin" && ADMINISTRATOR_PAGES.has(routeSegments[0]) ? routeSegments[0] : "instances",
   };
 }
 
@@ -54,21 +52,17 @@ function clearRoute() {
 }
 
 function createNavigation(principal, instances) {
-  if (principal.kind === "visitor") {
-    return [{
-      label: "工作区",
-      items: [
-        { key: "import", label: "渠道导入", icon: FileInput },
-        { key: "records", label: "导入记录", icon: History },
-      ],
-    }];
-  }
+  const isAdministrator = principal.kind === "admin";
   return [
     {
       label: "控制台",
       items: [
-        { key: "instances", label: "实例管理", icon: Server, meta: instances.length },
-        { key: "records", label: "Key 记录", icon: KeyRound },
+        { key: "publish", label: "新建渠道", icon: Rocket },
+        { key: "instances", label: isAdministrator ? "实例管理" : "我的实例", icon: Server, meta: instances.length },
+        ...(isAdministrator ? [
+          { key: "users", label: "用户管理", icon: Users },
+          { key: "records", label: "Key 记录", icon: KeyRound },
+        ] : []),
       ],
     },
     ...(instances.length > 0 ? [{
@@ -80,10 +74,10 @@ function createNavigation(principal, instances) {
         dotTone: instance.enabled ? "is-enabled" : "is-disabled",
       })),
     }] : []),
-    {
+    ...(isAdministrator ? [{
       label: "个人",
       items: [{ key: "security", label: "账号安全", icon: ShieldCheck }],
-    },
+    }] : []),
   ];
 }
 
@@ -98,17 +92,17 @@ export default function ApplicationClient() {
 
   const isAdministrator = sessionState.principal?.kind === "admin";
 
-  const loadInstances = useCallback(async () => {
+  const loadInstances = useCallback(async (signal) => {
     setIsLoadingInstances(true);
     try {
-      const responsePayload = await requestJson("/api/admin/instances");
-      setInstances(responsePayload.data.instances);
+      const responsePayload = await requestJson(isAdministrator ? "/api/admin/instances" : "/api/instances", { signal });
+      if (!signal?.aborted) setInstances(responsePayload.data.instances);
     } catch (error) {
-      showToast(error?.message || "读取实例列表失败", { type: "error" });
+      if (!signal?.aborted) showToast(error?.message || "读取实例列表失败", { type: "error" });
     } finally {
-      setIsLoadingInstances(false);
+      if (!signal?.aborted) setIsLoadingInstances(false);
     }
-  }, []);
+  }, [isAdministrator]);
 
   useEffect(() => {
     let isActive = true;
@@ -145,19 +139,22 @@ export default function ApplicationClient() {
   }, []);
 
   useEffect(() => {
-    if (isAdministrator) {
-      loadInstances();
-    } else {
+    if (sessionState.status !== "authenticated") {
       setInstances([]);
+      setIsLoadingInstances(false);
+      return;
     }
-  }, [isAdministrator, loadInstances]);
+    const controller = new AbortController();
+    loadInstances(controller.signal);
+    return () => controller.abort();
+  }, [sessionState.status, loadInstances]);
 
   function handleAuthenticated(principal) {
     clearRoute();
     setRouteSegments([]);
     setSessionState({ status: "authenticated", principal });
     showToast(
-      principal.kind === "admin" ? "管理员登录成功" : "实例访问验证成功",
+      "登录成功",
       { type: "success" },
     );
   }
@@ -196,10 +193,6 @@ export default function ApplicationClient() {
   const openInstance = (instanceId) => navigateTo(`instances/${instanceId}`);
 
   function handleNavigate(navigationKey) {
-    if (currentPrincipal.kind === "visitor") {
-      navigateTo(navigationKey);
-      return;
-    }
     if (navigationKey.startsWith("instance:")) {
       openInstance(navigationKey.slice("instance:".length));
       return;
@@ -208,24 +201,11 @@ export default function ApplicationClient() {
   }
 
   function changeWorkspaceView(workspaceView) {
-    if (currentPrincipal.kind === "visitor") {
-      navigateTo(workspaceView);
-      return;
-    }
     navigateTo(`instances/${route.instanceId}/${workspaceView}`);
   }
 
-  const activeNavigationKey = currentPrincipal.kind === "visitor"
-    ? route.workspaceView
-    : route.page === "workspace" ? `instance:${route.instanceId}` : route.page;
-  const shellUser = currentPrincipal.kind === "admin"
-    ? { name: currentPrincipal.username, initial: currentPrincipal.username.slice(0, 1).toUpperCase() }
-    : {
-      name: currentPrincipal.memberName
-        ? `${currentPrincipal.memberName} · ${currentPrincipal.instanceName}`
-        : currentPrincipal.instanceName,
-      initial: (currentPrincipal.memberName || currentPrincipal.instanceName).slice(0, 1).toUpperCase(),
-    };
+  const activeNavigationKey = route.page === "workspace" ? `instance:${route.instanceId}` : route.page;
+  const shellUser = { name: currentPrincipal.username, initial: currentPrincipal.username.slice(0, 1).toUpperCase() };
 
   let pageContent;
   if (route.page === "workspace") {
@@ -235,22 +215,43 @@ export default function ApplicationClient() {
         instanceId={route.instanceId}
         view={route.workspaceView}
         onViewChange={changeWorkspaceView}
-        isAdministrator={currentPrincipal.kind === "admin"}
         onBack={() => navigateTo("instances")}
       />
     );
   } else if (route.page === "records") {
     pageContent = <AdminRecordsOverview instances={instances} onOpenInstance={openInstance} />;
+  } else if (route.page === "publish") {
+    pageContent = <ChannelPublisher instances={instances} isLoadingInstances={isLoadingInstances} />;
+  } else if (route.page === "users") {
+    pageContent = <AdminUsers />;
   } else if (route.page === "security") {
     pageContent = <AccountSecurity username={currentPrincipal.username} />;
-  } else {
+  } else if (isAdministrator) {
     pageContent = (
       <AdminInstances
         instances={instances}
         isLoading={isLoadingInstances}
-        onReload={loadInstances}
+        onReload={() => loadInstances()}
         onOpenInstance={openInstance}
       />
+    );
+  } else {
+    pageContent = (
+      <section>
+        <h1>我的实例</h1>
+        {isLoadingInstances ? <Spinner /> : instances.length === 0 ? (
+          <EmptyState icon={Server} title="暂无可访问的实例" description="请联系管理员分配实例。" />
+        ) : (
+          <div className="member-list">
+            {instances.map((instance) => (
+              <article className="member-card member-card-head" key={instance.id}>
+                <strong>{instance.name}</strong>
+                <button className="btn btn-outline" type="button" onClick={() => openInstance(instance.id)}>进入实例</button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     );
   }
 

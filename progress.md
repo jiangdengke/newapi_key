@@ -1506,3 +1506,218 @@
 ### Notes
 
 - 回滚方式：恢复本轮修改前的代码，并恢复升级前的 SQLite 备份；旧版本不能直接使用 schema 10 数据库。
+
+## 2026-11-15 - Task: Oracle 公网 HTTPS 全新部署
+
+### What was done
+
+- 按用户确认，把源码 `d3d1c2efa4538fea961e3dbb490d1b13f80308eb` 部署到 Oracle，公网入口为 `https://newkey.8259200.xyz`，使用全新管理员、加密密钥和 SQLite 数据卷，不迁移本机数据。
+- 使用独立 Compose 项目 `newapi-key-oracle`，只向宿主机 `127.0.0.1:14173` 发布端口；原有壁纸服务继续占用 `4173`，其他运行容器保持原状态。
+- 发现服务器仍保留旧项目目录和数据卷，因此新建 `/opt/newapi-key-oracle` 与 `newapi-key-oracle_importer-data`，未读取、覆盖或删除旧业务数据。
+- 新增本域名 Nginx 虚拟主机，签发独立 Let's Encrypt 证书，配置 HTTP 跳转、流式代理及域名级证书续期 reload hook；密码与密钥只保存在权限为 `0600` 的服务器 `.env`。
+- 补充部署模板、首次登录、备份更新、停服恢复和撤销部署说明；本轮没有修改应用业务代码或现有数据库结构。
+
+### Testing
+
+- `npm test`：54 项全部通过；Oracle ARM64 `docker compose up -d --build` 成功，构建中的 `npm ci` 报告 0 个漏洞。
+- `docker compose config --quiet`、`nginx -t`：通过；容器保持运行，发布地址为 `127.0.0.1:14173`，重启策略为 `unless-stopped`，挂载独立数据卷。
+- 公网 HTTP 返回 `301` 并指向 HTTPS；公网与源站 HTTPS 首页均返回 `200`，匿名 `/api/auth/me` 返回 `401`，首页引用的 JavaScript 和 CSS 可访问。
+- 使用服务器私有初始化密码通过公网 HTTPS 登录成功；管理员身份与空实例列表查询通过，Cookie 包含 `Secure`、`HttpOnly`、`SameSite=Strict`。强制重建容器后原管理员和会话仍有效，退出后原会话返回 `401`；验证未输出密码或 Cookie。
+- `certbot renew --cert-name newkey.8259200.xyz --dry-run --run-deploy-hooks --no-random-sleep-on-renew`：通过，续期 hook 的 Nginx 校验与 reload 成功；证书到期日为 `2027-02-12`。
+- 决策笔记 tree、format、archived 三项脚本校验通过；编辑文件的 IDE diagnostics 无错误，`git diff --check` 通过。
+- 验证边界：未执行交互式浏览器验收，未配置真实 New API 实例或创建上游渠道。Python urllib 的公网探测收到 `403`，使用可正常访问的 curl 完成登录和持久化验收，未调整 Cloudflare 安全设置。Nginx reload 后的首次即时源站探测命中旧证书，后续独立检查确认已加载新证书且信任校验通过。
+
+### Notes
+
+- `deploy/oracle/newkey.http.conf`：新增仅用于首次 ACME 校验的域名配置。
+- `deploy/oracle/newkey.https.conf`：新增正式 HTTPS、HTTP 跳转和流式反向代理配置。
+- `docs/oracle-deployment.md`：记录访问、私有密码获取、启停、证书、备份更新及撤销操作。
+- `.agents/notes/implemented/process/2026-11-15-oracle-deployment.md`：记录新旧部署隔离、端口取舍、访问边界与验收证据。
+- `progress.md`：仅在末尾追加本轮部署与验证记录。
+- 服务器 `/opt/newapi-key-oracle/`：新建独立源码快照、部署模板和运维文档副本。
+- 服务器 `/opt/newapi-key-oracle/.env`：新建独立随机管理员密码、加密密钥、安全 Cookie 和端口配置，值不回写仓库。
+- 服务器 `/etc/nginx/conf.d/newkey.8259200.xyz.conf`：新增本域名反向代理，不修改其他虚拟主机。
+- 服务器 `/etc/letsencrypt/live/newkey.8259200.xyz/`、对应 archive 与 renewal 配置：新增证书、续期参数和成功后 reload hook。
+- 服务器 Docker `newapi-key-oracle-importer-1`、`newapi-key-oracle_default`、`newapi-key-oracle_importer-data`：新建单实例容器、网络和持久化卷。
+- 风险：部署后根磁盘剩余约 `7.5 GB`、使用率 `84%`；本轮未清理任何旧镜像或数据。
+- 回滚方式：执行 `ssh oracle 'cd /opt/newapi-key-oracle && sudo docker compose stop importer && sudo mv /etc/nginx/conf.d/newkey.8259200.xyz.conf /etc/nginx/conf.d/newkey.8259200.xyz.conf.disabled && sudo nginx -t && sudo systemctl reload nginx'`，保留新旧数据库、密钥和证书。仓库可单独删除本轮新增模板与文档，并只移除这段新增日志；本轮没有 Git 提交。
+
+## 2026-11-22 - Task: 本地启动 New API Key
+
+### What was done
+
+- 在本机启动开发服务，以 `127.0.0.1:4173` 提供访问。保留原 `.env`，为新建的本地数据库单独初始化管理员，不连接或修改 Oracle 部署。
+
+### Testing
+
+- 确认只监听 `127.0.0.1:4173`；首页返回 `200`，未登录的身份接口返回 `401`。管理员登录、查询身份及退出均返回 `200`；未输出密码或会话值。
+- Next.js 启动时提示当前版本存在已知安全问题；本次服务仅供本机使用，未调整依赖。
+
+### Notes
+
+- `.env.local`：以 `0600` 权限保存随机的本地初始化密码，已由 Git 忽略。
+- `data/channel-records.sqlite`：由服务首次启动生成，不迁移生产数据。
+- `progress.md`：仅追加本轮启动与验证记录。
+- 回滚：用 `lsof -nP -iTCP:4173 -sTCP:LISTEN` 确认本地服务 PID 后，执行 `kill -TERM <PID>` 停止服务，保留数据库和凭据。
+
+## 2026-11-22 - Task: 普通用户密码登录与多实例授权（本地）
+
+### What was done
+
+- 管理员可以创建、编辑、停用账号和重置密码。普通用户使用账号密码登录，在获授权的实例间切换，沿用所绑定成员的配置和记录。撤下旧访问 Key 登录及签发入口，不影响导入渠道 Key。
+- 重启本机服务以加载新的账号逻辑。未推送，未连接 Oracle 或真实上游；每次导入仍只处理一个实例。
+
+### Testing
+
+- `npm test`：54 项通过，包括跨实例授权、同实例成员隔离、管理员权限、密码重置和停用后的会话失效，以及迁移后重新打开数据库。四类渠道使用模拟上游。
+- `npm run build` 完成。本机 `npm start` 只监听 `127.0.0.1:4173`。实际 HTTP 验证：首页、管理员登录、读取用户列表及退出均为 200；匿名读取用户列表为 401，旧登录入口为 404。未做浏览器逐项点击验收。
+
+### Notes
+
+- `lib/application-store.js` 迁移账号绑定、会话和有效成员计数；`lib/auth.js` 按当前实例授权；`lib/admin-validation.js` 校验账号输入；`lib/runtime-context.js` 移除废弃登录状态。
+- `app/api/auth/login/route.js` 统一密码登录；`app/api/admin/users/route.js` 管理普通用户；`app/api/instances/route.js` 返回授权列表；`app/api/instances/[instanceId]/{config,groups,import,records/query,records/sync}/route.js` 的五个接口按当前成员授权和过滤。
+- 删除 `app/api/access/login/route.js` 和 `app/api/admin/instances/[instanceId]/members/[memberId]/access-key/{route.js,reveal/route.js}`，不再接受、签发或显示成员登录 Key。
+- `components/access-gateway.js` 移除旧登录表单；`components/login-view.js` 适配普通账号；`components/admin-users.js` 管理账号和绑定；`components/admin-members.js` 保留成员设置；`components/admin-instances.js` 更新成员统计说明；`components/application-client.js` 提供两类导航；`components/instance-workspace.js` 支持普通用户切换记录和返回实例列表。
+- `test/account-fixtures.js` 提供测试会话；`test/admin-password-route.test.js` 和 `test/admin-sync-route.test.js` 保留管理权限检查；`test/application-store.test.js` 验证迁移与持久化；`test/authorization.test.js` 验证授权与撤销；`test/instance-route.test.js` 用账号会话验证导入。
+- `README.md` 说明账号入口；`docs/nextjs-usage.md` 说明授权步骤与迁移影响；`.agents/notes/implemented/feature/2026-11-22-account-login.md` 记录保留成员归属的原因；`progress.md` 追加验收证据。
+- 本机回滚点：旧代码 `d3d1c2e` 配合升级前的 `backups/channel-records-before-accounts-1795340812129.sqlite`。先停服务，另存现库及其 WAL/SHM，再用匹配的代码和备份启动；回滚会恢复旧 Key 登录，不包含备份之后的业务数据。
+
+## 2026-11-22 - Task: 单次填写渠道并推送至多个实例
+
+### What was done
+
+- 新增独立「新建渠道」流程。先选择 Claude、OpenAI、Grok 或 AWS，填写一份渠道 Key 和模型；下一步选择当前账号获授权的启用实例，并逐台选择该实例现有分组，再按序提交。
+- 每台沿用既有实例级授权、成员命名/记录隔离和单实例导入流程。页面分别反馈各台结果；失败独立保留，不对已提交请求自动重试，也不因一台失败回滚其他目标。
+- 更新使用文档和账号/多目标推送决策记录。改动只在本地，没有部署到 Oracle 或推送到 GitHub。
+
+### Testing
+
+- `node --test --test-reporter=dot test/channel-publishing.test.js`：通过，覆盖不同实例分组、各实例独立结果、Key 脱敏、流中断、401 会话过期和离开页面后不再提交后续目标。
+- `node --test --test-reporter=dot test/*.test.js`：57 项通过，包含现有鉴权、历史隔离和模拟上游导入测试。
+- `npm run build` 的完整独立编译与资源复制此前通过。最终加入会话过期事件后，`next build` 编译和类型检查均完成，但该次 npm wrapper 在资源复制前返回 1；随后 `node prepare-standalone.js` 成功，最终 standalone 服务、7 个客户端脚本均返回 `200`，bundle 包含新入口。
+- `git diff --check` 及 Agent Note tree/format/archive 验证通过；已对实现文件运行编辑器诊断，未发现诊断。
+- 本机 standalone 服务重启后确认只监听 `127.0.0.1:4173`；入口及 7 个客户端脚本均返回 `200`，生成的客户端包包含「新建渠道」入口。管理员登录、用户列表、实例列表和退出均 `200`；匿名用户列表 `401`；旧访问 Key 登录入口 `404`。验证不调用真实上游写入。
+- 当前本地账号没有配置任何 New API 目标（实例列表为 0），因此不能在本机实际选分组并写入目标；目标选择和多个实例结果由模拟 NDJSON 测试覆盖。需要管理员先配置实例并授权成员，才能使用推送流程。
+- 本地 schema 11 数据库和 schema 10 备份均通过 `PRAGMA quick_check`；未改变数据库或备份内容。
+
+### Notes
+
+- `components/channel-publisher.js` 提供渠道填写、实例选择、逐实例分组选择和结果展示；`lib/channel-publishing.js` 复用单实例 NDJSON 入口依次推送，脱敏失败信息，并处理不确定结果与登录过期。
+- `components/application-client.js` 为管理员和普通用户增加「新建渠道」导航与页面路由。
+- `test/channel-publishing.test.js` 使用合成 NDJSON 和模拟 fetch 验证多目标行为、分组独立、部分失败和中断边界。
+- `README.md` 和 `docs/nextjs-usage.md` 增加新流程说明与操作风险；`.agents/notes/implemented/feature/2026-11-22-channel-first-publishing.md` 记录复用既有单实例接口、分组逐台选取的取舍；账号说明中的跨实例授权更新为链接。
+- 本机回滚点：本条之前的工作树版本及 `progress.md` 上一条账号实现记录；恢复代码前应先停服务并保留当前数据库，不涉及 Oracle 数据。
+
+## 2026-11-22 - Task: 新建渠道模型候选选择
+
+### What was done
+
+- 「新建渠道」的模型输入改为按渠道类型筛选并多选内置候选，默认模型仍预选；保留手动添加和移除自定义模型，选择结果继续通过现有校验后共用于本批目标。
+- 明确内置候选只是便捷建议，不代表上游完整或实时目录。按用户补充，本次不添加 Claude 或其他渠道图标。
+
+### Testing
+
+- `node --test --test-reporter=dot test/*.test.js`：57 项通过。
+- `npm run build`：Next.js 生产编译及 standalone 资源准备均完成。
+- 本机 standalone 重启后，首页和 7 个 JavaScript 资源均返回 `200`；已在客户端资源中确认新模型候选界面文案。
+- `git diff --check` 与 Agent Note tree、format、archive 校验均通过。未做浏览器逐项点击或真实 New API 写入验证。
+
+### Notes
+
+- `components/channel-publisher.js` 增加可搜索的渠道模型候选多选，并保留手动输入、默认预选和既有模型校验。
+- `app/globals.css` 增加候选列表样式及窄屏单列布局。
+- `README.md`、`docs/nextjs-usage.md` 和 `.agents/notes/implemented/feature/2026-11-22-channel-first-publishing.md` 说明候选选择方式与候选目录的非实时性质。
+- `progress.md` 记录本轮变更和验证结果。
+- 回滚点为本轮前工作树；如需撤回，只还原上述文件中的模型候选相关改动，再执行 `npm run build` 并重启本地服务。不要整文件回滚或执行 `git checkout`，这些文件同时包含本轮开始前已有的未提交账号及多实例功能；本轮未改数据库，无需数据回滚。
+
+## 2026-11-22 - Task: 精简新增实例表单
+
+### What was done
+
+- 新增实例时只展示实例名称、New API 地址和管理员账号密码。命名、编号、模型、优先级和权重继续使用系统预填值；需要时创建后可从编辑实例调整。
+- 保留现有实例编辑项、成员覆盖能力和 API/数据库字段，不迁移或删除旧配置。新建渠道仍负责本批渠道类型、Key、模型和逐目标分组。
+- 同步更新新增实例操作说明。
+
+### Testing
+
+- `npm test`：57 项通过。
+- `npm run build` 中 Next.js 编译、类型检查及路由生成均完成，但命令在 standalone 资源复制前返回 `1`；随后单独运行 `node prepare-standalone.js` 成功。完整 `npm run build` 返回码仍未通过验证。
+- 本机 standalone 服务重启后，首页及 7 个 JavaScript 资源均返回 `200`，并确认已加载简化表单文案。
+- `git diff --check` 通过；组件编辑器诊断无报告项。未连接真实 New API 测试。
+
+### Notes
+
+- `components/admin-instances.js`：新增实例表单隐藏可选渠道默认值，仅在编辑实例时保留这些高级设置，并说明默认值来源。
+- `README.md` 和 `docs/nextjs-usage.md`：说明新增实例只需连接信息、默认项及新建渠道职责边界。
+- `progress.md`：记录本轮改动、验证及回滚方式。
+- 回滚方式：仅恢复以上文件本轮相关改动，再重新构建并重启本地服务；不要整体回滚 `components/admin-instances.js` 或文档，因为其中包含本轮前其他未提交工作。数据库/API 未变，无数据回滚步骤。
+
+## 2026-11-22 - Task: 简化实例配置并补齐用户绑定入口
+
+### What was done
+
+- 编辑实例页收敛为连接信息和启停状态，移除渠道默认配置、模型、序号、优先级和权重编辑项；这些既有值仍留在存储中，不做数据库迁移。
+- 用户表单现在按实例直接授权。首次授权会为该账号自动创建访问成员；从实例管理的访问成员中也可直接创建或改绑账号。访问仍由成员启停实时控制，历史记录继续归属成员。
+- 更新实例成员与账号表单提示、操作文档和账号授权决策记录。
+
+### Testing
+
+- `node --test --test-reporter=dot test/authorization.test.js`：10 项通过，覆盖用户表单授权创建成员、实例列表、登录后只能访问授权实例、撤销权限、实例成员直接绑定账号及停用成员撤权。
+- `npm test`：完整测试套件通过。
+- `npm run build`：Next.js 编译、类型检查和路由构建完成，但脚本最终返回退出码 1 且无报错；单独执行 `node prepare-standalone.js` 成功。
+- 本机 smoke check：重启后的首页 HTTP 200，8 个 JS 和 1 个 CSS 资源均 HTTP 200；bundle 包含用户实例授权和成员绑定控件，编辑界面 bundle 不再包含“渠道模型”；未登录管理员 API 返回 401。
+- `git diff --check` 和决策记录链接/格式校验通过；ReadLints 未返回诊断（该工具报告扫描文件数为 0，不作为代码 lint 证据）。
+
+### Notes
+
+- `components/admin-instances.js`：移除实例级默认值编辑区和表格列，编辑页仅保留连接与启停。
+- `components/admin-users.js`：展示实例列表并直接勾选账号授权。
+- `components/admin-members.js`：支持创建/编辑访问成员时绑定账号并显示当前账号归属。
+- `lib/application-store.js`：按账号实例列表创建或启停访问成员，并保存成员账号映射；无 schema 变更。
+- `lib/admin-validation.js`：校验实例授权列表和成员绑定账号。
+- `lib/member-routes.js`：将成员账号重复绑定映射为可读冲突响应。
+- `app/api/admin/users/route.js`：向管理员表单返回实例列表。
+- `test/authorization.test.js`：验证两种授权入口及每实例实时授权边界。
+- `README.md`、`docs/nextjs-usage.md` 和 `.agents/notes/implemented/feature/2026-11-22-account-login.md`：记录新交互、实例表单收敛和归属规则。
+- `progress.md`：记录本轮改动、测试和回滚点。
+- 回滚方式：仅回退上述文件中本轮绑定交互和实例表单相关改动，再重新构建/重启；不执行全文件回退，以保留同文件已有的模型选择、账号登录等未提交工作。数据库结构和已有配置均未改变，无数据回滚步骤。
+
+## 2026-11-22 - Task: 实例端直接选择用户绑定
+
+### What was done
+
+- 把实例端新增成员表单改成只选择已有普通用户并确认。系统生成独立名称和前缀，其他渠道设置沿用实例默认值。
+- 首次绑定继续使用既有成员接口；已有成员的配置和历史记录保留。已绑定但停用的成员通过列表开关恢复访问，不重复创建。
+
+### Testing
+
+- `npm test` 通过，包含实例端成员绑定、实例授权和访问隔离回归。
+- Next.js 编译与路由生成完成，`npm run build` 仍返回 1。单独执行 `node prepare-standalone.js` 后重启成功，本地首页及 8 个静态资源均返回 HTTP 200；运行资源包含新版选用户、确认绑定文案。
+- `git diff --check` 与决策记录校验通过。未在浏览器提交真实授权，也未修改上游实例数据。
+
+### Notes
+
+- `components/admin-members.js`：拆分直接绑定和既有成员编辑的表单内容，自动生成创建请求所需的名称及前缀。
+- `components/admin-instances.js`：让空成员实例的入口名称与实际打开的管理页一致。
+- `docs/nextjs-usage.md`：记录直接绑定与恢复已停用成员的操作。
+- `.agents/notes/implemented/feature/2026-11-22-account-login.md`：同步绑定交互及成员归属边界。
+- `progress.md`：追加本轮验证与回滚说明。
+- 回滚点：恢复以上文件在本节开始前的相关改动，再执行构建及 `npm start`；仅回退本轮差异，避免覆盖之前的未提交修改。不涉及 schema 变更。
+
+## 2026-11-22 - Task: 暂停供应商门户适配并撤回试作
+
+### What was done
+
+- 核对门户公开前端的登录、可用渠道、Key 提交及批次查询约定；公开登录配置显示强制启用阿里验证码，不能只凭账号密码完成正常接入。
+- 用户选择“先不做”后，选择性撤回本轮平台类型、数据库迁移和实例表单试作，保留先前账号授权及直接绑定功能。未登录门户、提交 Key 或变更真实实例配置。
+
+### Testing
+
+- 撤回后检查 `lib/`，无本轮 `platformType`、`platform_type` 或 `supplier-portal` 实现残留，schema 常量仍为 11；本轮新建的平台模块和测试文件已删除。
+- 撤回执行者运行的 10 项验证、存储及安全相关测试通过；测试仅使用内存或临时数据库，未访问正式数据库。
+- `git diff --check` 通过。未构建、重启服务或执行正式数据库迁移；现有本地服务保持原版本运行。
+
+### Notes
+
+- `progress.md`：本轮唯一保留的仓库改动，记录暂停原因、选择性撤回及验证边界。
+- 回滚方式：用编辑器删除本节标题至文件末尾的本轮新增记录；代码和数据库已保持本轮开始前状态，无需回滚其他文件或重启服务。

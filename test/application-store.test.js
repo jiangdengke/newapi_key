@@ -180,7 +180,7 @@ function createVersionOneDatabase(databasePath) {
   database.close();
 }
 
-test("ApplicationStore migrates v1 data and revokes visitor sessions with access keys", () => {
+test("ApplicationStore migrates v1 data and preserves administrator access", () => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "newapi-application-store-"));
   const databasePath = join(temporaryDirectory, "records.sqlite");
   createVersionOneDatabase(databasePath);
@@ -190,9 +190,6 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
     initialInstance: null,
     bootstrapAdmin: null,
   });
-  let firstAccessKey;
-  let secondAccessKey;
-
   try {
     const instances = store.listInstances();
     assert.equal(instances.length, 2);
@@ -247,33 +244,13 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
       name: "张三",
       namePrefix: "zhangsan",
     });
-    firstAccessKey = generatedAccess.accessKey;
-    assert.match(firstAccessKey, /^nai_[A-Za-z0-9_-]{43}$/);
-    assert.equal(generatedAccess.member.accessKey.configured, true);
-    assert.equal(store.getInstance(configuredInstance.id).activeMemberCount, 1);
-    const firstVisitorSession = store.createVisitorSessionForAccessKey(firstAccessKey);
-    assert.equal(firstVisitorSession.principal.instanceId, configuredInstance.id);
-    assert.equal(firstVisitorSession.principal.memberName, "张三");
-
-    const regeneratedAccess = store.regenerateMemberAccessKey(generatedAccess.member.id);
-    secondAccessKey = regeneratedAccess.accessKey;
-    assert.equal(store.getPrincipalBySessionToken(firstVisitorSession.token), null);
-    assert.equal(store.createVisitorSessionForAccessKey(firstAccessKey), null);
-    const secondVisitorSession = store.createVisitorSessionForAccessKey(secondAccessKey);
-    assert.equal(secondVisitorSession.principal.kind, "visitor");
-
+    assert.equal(generatedAccess.accessKey, undefined);
+    assert.equal(store.getInstance(configuredInstance.id).activeMemberCount, 0);
     const disabledMember = store.updateInstanceMember(generatedAccess.member.id, {
       ...generatedAccess.member,
       enabled: false,
     });
     assert.equal(disabledMember.enabled, false);
-    assert.equal(store.getPrincipalBySessionToken(secondVisitorSession.token), null);
-    assert.equal(store.createVisitorSessionForAccessKey(secondAccessKey), null);
-
-    const deletionAccess = store.createInstanceMember(configuredInstance.id, { name: "李四", namePrefix: "lisi" });
-    const deletionVisitorSession = store.createVisitorSessionForAccessKey(
-      deletionAccess.accessKey,
-    );
     store.recordImportedChannel({
       instanceId: configuredInstance.id,
       baseUrl: configuredInstance.baseUrl,
@@ -297,11 +274,10 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
     assert.equal(deletion.instance.id, configuredInstance.id);
     assert.equal(deletion.deletedChannelRecordCount, 1);
     assert.equal(store.getInstance(configuredInstance.id), null);
-    assert.equal(store.getPrincipalBySessionToken(deletionVisitorSession.token), null);
     assert.equal(store.getInstance(placeholderInstance.id).id, placeholderInstance.id);
     assert.equal(store.deleteInstance(configuredInstance.id), null);
 
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 10);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 11);
     assert.deepEqual(store.database.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(store.database.prepare(`
       SELECT COUNT(*) AS total FROM users WHERE role = 'user'
@@ -316,8 +292,6 @@ test("ApplicationStore migrates v1 data and revokes visitor sessions with access
 
   try {
     const databaseBytes = readFileSync(databasePath);
-    assert.equal(databaseBytes.includes(Buffer.from(firstAccessKey)), false);
-    assert.equal(databaseBytes.includes(Buffer.from(secondAccessKey)), false);
     assert.equal(databaseBytes.includes(Buffer.from(ADMINISTRATOR_PASSWORD)), false);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -359,9 +333,6 @@ test("ApplicationStore disables legacy Admin Hub instances and drops protocol co
     name: "Legacy Admin Hub",
     baseUrl: "https://admin-hub.example.com",
   });
-  const adminHubVisitorSession = versionSixStore.createVisitorSessionForAccessKey(
-    versionSixStore.createInstanceMember(adminHubInstance.id, { name: "测试成员" }).accessKey,
-  );
   versionSixStore.database.exec(`
     ALTER TABLE new_api_instances
     ADD COLUMN connection_protocol TEXT NOT NULL DEFAULT 'new-api';
@@ -379,7 +350,6 @@ test("ApplicationStore disables legacy Admin Hub instances and drops protocol co
   try {
     assert.equal(store.getInstance(standardInstance.id).enabled, true);
     assert.equal(store.getInstance(adminHubInstance.id).enabled, false);
-    assert.equal(store.getPrincipalBySessionToken(adminHubVisitorSession.token), null);
     assert.equal(
       store.getInstanceConnection(adminHubInstance.id).password,
       "new-api-password",
@@ -390,7 +360,7 @@ test("ApplicationStore disables legacy Admin Hub instances and drops protocol co
     assert.equal(columnNames.includes("connection_protocol"), false);
     assert.equal(columnNames.includes("admin_hub_target_site_id"), false);
     assert.equal("connectionProtocol" in store.getInstance(standardInstance.id), false);
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 10);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 11);
   } finally {
     store.close();
     rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -457,7 +427,7 @@ test("ApplicationStore keeps per-instance channel models and falls back to defau
   }
 });
 
-test("ApplicationStore moves a schema 9 instance access key into a default member", () => {
+test("ApplicationStore preserves schema 9 member records and revokes legacy keys", () => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "newapi-member-migration-"));
   const databasePath = join(temporaryDirectory, "records.sqlite");
   const legacyAccessKey = `nai_${"m".repeat(43)}`;
@@ -534,16 +504,14 @@ test("ApplicationStore moves a schema 9 instance access key into a default membe
     assert.equal(defaultMember.namePrefix, "claude");
     assert.equal(defaultMember.dateMode, null);
     assert.equal(defaultMember.enabled, true);
-    assert.equal(defaultMember.accessKey.mask, maskInstanceAccessKey(legacyAccessKey));
-    assert.equal(store.getMemberAccessKey(defaultMember.id).accessKey, legacyAccessKey);
-    assert.deepEqual(store.getPrincipalBySessionToken("current-visitor-token"), {
-      kind: "visitor",
-      instanceId: instance.id,
-      instanceName: "oracle",
-      memberId: defaultMember.id,
-      memberName: "默认成员",
-    });
+    const retiredKey = store.database.prepare(`
+      SELECT access_key_digest, access_key_ciphertext FROM instance_members WHERE id = ?
+    `).get(defaultMember.id);
+    assert.equal(retiredKey.access_key_digest, null);
+    assert.equal(retiredKey.access_key_ciphertext, null);
+    assert.equal(store.getPrincipalBySessionToken("current-visitor-token"), null);
     assert.equal(store.getPrincipalBySessionToken("stale-visitor-token"), null);
+    assert.equal(store.database.prepare("SELECT COUNT(*) AS total FROM visitor_sessions").get().total, 0);
     assert.deepEqual(
       store.listRecords(instance.id, defaultMember.id).map((record) => record.channelName),
       ["claude-0101-001"],
@@ -552,7 +520,28 @@ test("ApplicationStore moves a schema 9 instance access key into a default membe
     const instanceColumns = store.database.prepare("PRAGMA table_info(new_api_instances)").all()
       .map((column) => column.name);
     assert.equal(instanceColumns.some((columnName) => columnName.startsWith("access_key_")), false);
-    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 10);
+    assert.equal(store.database.prepare("PRAGMA user_version").get().user_version, 11);
+    store.saveOrdinaryUser(null, {
+      username: "migrated-member",
+      password: "migrated-member-password",
+      enabled: true,
+      memberIds: [defaultMember.id],
+    });
+    const account = store.authenticateAccount("migrated-member", "migrated-member-password");
+    const { token } = store.createAccountSession(account.id);
+    const reopenedStore = new ApplicationStore({
+      databasePath,
+      encryptionKey: ENCRYPTION_KEY,
+      initialInstance: null,
+      bootstrapAdmin: null,
+    });
+    try {
+      assert.deepEqual(reopenedStore.getPrincipalBySessionToken(token), account);
+      assert.deepEqual(reopenedStore.listAccessibleUserInstances(account.id).map(({ id }) => id), [instance.id]);
+      assert.equal(reopenedStore.getAccessibleUserMember(account.id, instance.id).id, defaultMember.id);
+    } finally {
+      reopenedStore.close();
+    }
   } finally {
     store.close();
     rmSync(temporaryDirectory, { recursive: true, force: true });

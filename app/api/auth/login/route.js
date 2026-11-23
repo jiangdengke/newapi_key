@@ -39,11 +39,11 @@ export async function POST(request) {
       });
     }
 
-    const administrator = context.store.authenticateAdministrator(
+    const account = context.store.authenticateAccount(
       loginInput.username,
       loginInput.password,
     );
-    if (!administrator) {
+    if (!account) {
       const failedCount = attemptState?.expiresAt > currentTime
         ? attemptState.failedCount + 1
         : 1;
@@ -65,14 +65,14 @@ export async function POST(request) {
 
     context.loginAttempts.delete(attemptKey);
     context.store.deleteSession(getSessionToken(request));
-    const session = context.store.createAdministratorSession(administrator.id);
+    const session = context.store.createAccountSession(account.id);
     context.logger.info("application_login_succeeded", {
-      username: administrator.username,
+      username: account.username,
       durationMilliseconds: Date.now() - startedAt,
-      administratorId: administrator.id,
+      ...(account.kind === "admin" ? { administratorId: account.id } : { userId: account.id }),
       requestId,
     });
-    return jsonResponse({ success: true, data: { principal: administrator } }, {
+    return jsonResponse({ success: true, data: { principal: account } }, {
       requestId,
       headers: { "Set-Cookie": createSessionCookie(session.token, session.expiresAt) },
     });

@@ -9,6 +9,7 @@ import { POST as synchronizeVisitorRecords } from "../app/api/instances/[instanc
 import { ApplicationStore } from "../lib/application-store.js";
 import { SESSION_COOKIE_NAME } from "../lib/http.js";
 import { synchronizeInstanceRecords } from "../lib/instance-service.js";
+import { createMemberAccountSession } from "./account-fixtures.js";
 
 const RUNTIME_CONTEXT_KEY = Symbol.for("newapi-key.runtime-context");
 const ADMINISTRATOR_PASSWORD = "administrator-password";
@@ -262,7 +263,7 @@ test("instance import route streams safe per-key results", async () => {
       enabled: true,
     });
     const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+    const session = createMemberAccountSession(store, [generatedAccess.member.id]);
 
     const anonymousResponse = await importChannels(
       new Request(`http://localhost/api/instances/${instance.id}/import`, {
@@ -365,7 +366,7 @@ test("standard New API import creates an official OpenAI channel", async () => {
       enabled: true,
     });
     const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+    const session = createMemberAccountSession(store, [generatedAccess.member.id]);
     const response = await importChannels(
       createImportRequest(
         instance.id,
@@ -459,7 +460,7 @@ test("standard New API import creates an official xAI Grok channel", async () =>
       enabled: true,
     });
     const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+    const session = createMemberAccountSession(store, [generatedAccess.member.id]);
 
     const groupsResponse = await getInstanceGroups(
       createInstanceGetRequest(instance.id, session.token, "groups"),
@@ -583,7 +584,7 @@ test("import uses instance channel models and per-import model overrides", async
       enabled: true,
     });
     const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+    const session = createMemberAccountSession(store, [generatedAccess.member.id]);
 
     const configurationResponse = await getInstanceConfiguration(
       createInstanceGetRequest(instance.id, session.token, "config"),
@@ -670,8 +671,8 @@ test("each member imports with its own name prefix and channel defaults", async 
       weight: 4,
     });
     const inheritingMember = store.createInstanceMember(instance.id, { name: "李四", namePrefix: "lisi" });
-    const overridingSession = store.createVisitorSessionForAccessKey(overridingMember.accessKey);
-    const inheritingSession = store.createVisitorSessionForAccessKey(inheritingMember.accessKey);
+    const overridingSession = createMemberAccountSession(store, [overridingMember.member.id]);
+    const inheritingSession = createMemberAccountSession(store, [inheritingMember.member.id]);
     const routeContext = { params: Promise.resolve({ instanceId: String(instance.id) }) };
 
     const configurationPayload = await (await getInstanceConfiguration(
@@ -764,7 +765,7 @@ test("AWS import creates type 33 channels with key type and interface settings",
       enabled: true,
     });
     const generatedAccess = store.createInstanceMember(instance.id, { name: "测试成员" });
-    const session = store.createVisitorSessionForAccessKey(generatedAccess.accessKey);
+    const session = createMemberAccountSession(store, [generatedAccess.member.id]);
     const request = createImportRequest(
       instance.id,
       session.token,

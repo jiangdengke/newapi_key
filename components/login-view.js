@@ -40,7 +40,7 @@ export default function LoginView({ onAuthenticated }) {
         <input
           className="input"
           autoComplete="username"
-          placeholder="输入管理员用户名"
+          placeholder="输入用户名"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
           autoFocus

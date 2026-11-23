@@ -18,12 +18,13 @@ export async function POST(request, { params }) {
   const { instanceId } = await params;
   try {
     requireSameOrigin(request);
-    const { principal } = requireInstanceAccess(request, instanceId);
+    requireInstanceAccess(request, instanceId);
     const requestBody = await readJsonBody(request);
+    const { member } = requireInstanceAccess(request, instanceId);
     const data = context.store.queryRecords({
       ...validateRecordQueryInput(requestBody),
       instanceId,
-      memberId: principal.kind === "visitor" ? principal.memberId : null,
+      memberId: member?.id ?? null,
     });
     return jsonResponse({ success: true, data }, { requestId });
   } catch (error) {

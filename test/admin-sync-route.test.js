@@ -4,6 +4,7 @@ import test from "node:test";
 import { POST as synchronizeAdministratorRecords } from "../app/api/admin/records/route.js";
 import { ApplicationStore } from "../lib/application-store.js";
 import { SESSION_COOKIE_NAME } from "../lib/http.js";
+import { createMemberAccountSession } from "./account-fixtures.js";
 
 const RUNTIME_CONTEXT_KEY = Symbol.for("newapi-key.runtime-context");
 const ADMINISTRATOR_PASSWORD = "administrator-password";
@@ -97,7 +98,7 @@ test("administrator sync route authorizes callers and skips ineligible instances
     recordTrackedChannel(store, enabledInstance, 101);
     recordTrackedChannel(store, disabledInstance, 102);
     const visitorAccess = store.createInstanceMember(enabledInstance.id, { name: "测试成员" });
-    const visitorSession = store.createVisitorSessionForAccessKey(visitorAccess.accessKey);
+    const visitorSession = createMemberAccountSession(store, [visitorAccess.member.id]);
 
     let synchronizedSearchCount = 0;
     const enabledConnection = store.getInstanceConnection(enabledInstance.id);

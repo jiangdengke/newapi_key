@@ -12,15 +12,13 @@ import {
   Power,
   RefreshCw,
   Server,
-  Settings2,
   Trash2,
   Users,
 } from "lucide-react";
 
 import { requestJson } from "../lib/client-api.js";
-import { formatChannelNamePattern } from "../lib/format.js";
 import { showToast } from "../lib/toast.js";
-import { CHANNEL_KIND_LABELS, DEFAULT_CHANNEL_MODELS } from "../lib/validation.js";
+import { DEFAULT_CHANNEL_MODELS } from "../lib/validation.js";
 import InstanceMembersSheet from "./admin-members.js";
 import {
   ConfirmDialog,
@@ -35,7 +33,6 @@ import {
   StatCard,
   StatusText,
   Switch,
-  TagInput,
 } from "./ui.js";
 
 const EMPTY_INSTANCE_FORM = Object.freeze({
@@ -52,11 +49,6 @@ const EMPTY_INSTANCE_FORM = Object.freeze({
   channelModels: DEFAULT_CHANNEL_MODELS,
   enabled: true,
 });
-
-function hasSameModels(firstModels, secondModels) {
-  return firstModels.length === secondModels.length
-    && firstModels.every((model, modelIndex) => model === secondModels[modelIndex]);
-}
 
 function createInstanceFormFromInstance(instance) {
   return {
@@ -114,89 +106,18 @@ function InstanceFormFields({ instanceForm, onChange, isEditing }) {
         </div>
       </section>
 
-      <section className="form-section">
-        <SectionHeading
-          icon={Settings2}
-          title="渠道默认值"
-          description="应用到之后通过该实例新建的每个渠道；访问成员可单独覆盖名称前缀、日期、序号、优先级和权重。"
-          tone="success"
-        />
-        <div className="form-grid">
-          <Field label="名称前缀" hint="新增成员时的参考值，实际导入使用成员自己的前缀。">
-            <input className="input" value={instanceForm.namePrefix} onChange={(event) => onChange("namePrefix", event.target.value)} required />
-          </Field>
-          <Field label="起始序号">
-            <input className="input" type="number" min="1" max="999999" value={instanceForm.startNumber} onChange={(event) => onChange("startNumber", event.target.value)} required />
-          </Field>
-          <Field label="日期模式" hint="留空表示不加日期；auto 使用当天 MMDD；也可填写固定四位，如 0711。" wide>
-            <input className="input" value={instanceForm.dateMode} onChange={(event) => onChange("dateMode", event.target.value)} placeholder="留空、auto 或 0711" />
-          </Field>
-          <Field label="渠道优先级" hint="允许负整数。">
-            <input className="input" type="number" step="1" value={instanceForm.priority} onChange={(event) => onChange("priority", event.target.value)} required />
-          </Field>
-          <Field label="渠道权重" hint="非负整数。">
-            <input className="input" type="number" min="0" step="1" value={instanceForm.weight} onChange={(event) => onChange("weight", event.target.value)} required />
-          </Field>
-        </div>
-        <Switch
-          checked={instanceForm.continueFromExisting}
-          onChange={(checked) => onChange("continueFromExisting", checked)}
-          label="接续现有同前缀序号"
-          description="从上游已有同前缀渠道的最大序号之后继续编号。"
-        />
-      </section>
-
-      <section className="form-section">
-        <SectionHeading
-          icon={Boxes}
-          title="渠道模型"
-          description="导入渠道时默认使用的模型，访问者导入时可临时增删。"
-          tone="info"
-        />
-        {Object.entries(CHANNEL_KIND_LABELS).map(([channelKind, channelLabel]) => {
-          const channelModels = instanceForm.channelModels[channelKind];
-          const defaultModels = DEFAULT_CHANNEL_MODELS[channelKind];
-          return (
-            <Field
-              key={channelKind}
-              label={`${channelLabel} 模型`}
-              extra={(
-                <span className="field-actions">
-                  <span className="field-counter">{channelModels.length} 个</span>
-                  {hasSameModels(channelModels, defaultModels) ? null : (
-                    <button
-                      className="btn btn-ghost btn-xs"
-                      type="button"
-                      onClick={() => onChange("channelModels", {
-                        ...instanceForm.channelModels,
-                        [channelKind]: [...defaultModels],
-                      })}
-                    >
-                      恢复默认
-                    </button>
-                  )}
-                </span>
-              )}
-            >
-              <TagInput
-                values={channelModels}
-                placeholder="输入模型名后回车，可一次粘贴多个"
-                onChange={(nextModels) => onChange("channelModels", {
-                  ...instanceForm.channelModels,
-                  [channelKind]: nextModels,
-                })}
-              />
-            </Field>
-          );
-        })}
-      </section>
+      {!isEditing ? (
+        <p className="form-note">
+          创建后使用系统默认渠道设置；新建渠道流程中选择本批类型、Key、模型及每个目标实例的分组。用户命名前缀可在访问成员中设置。
+        </p>
+      ) : null}
 
       {isEditing ? (
         <section className="form-section">
           <SectionHeading
             icon={Power}
             title="实例状态"
-            description="停用后访问者无法进入，现有访客会话立即失效。"
+            description="停用后普通用户无法访问该实例，不影响其访问其他实例。"
             tone="warning"
           />
           <Switch
@@ -328,7 +249,7 @@ export default function AdminInstances({
     <div className="page">
       <PageHeader
         title="实例管理"
-        description="维护 New API 实例的连接信息、渠道默认值和访问成员。"
+        description="维护 New API 连接和访问用户。实例只保存连接信息，渠道配置在新建渠道流程中填写。"
         actions={(
           <>
             <button className="btn btn-outline" type="button" disabled={isLoading} onClick={onReload}>
@@ -345,7 +266,7 @@ export default function AdminInstances({
 
       <div className="stat-grid">
         <StatCard icon={Server} label="实例总数" value={instances.length} hint={`已启用 ${enabledInstanceCount} 个`} />
-        <StatCard icon={Users} label="访问成员" value={activeMemberCount} hint="已启用的成员，各自凭 Key 进入实例" tone="success" />
+        <StatCard icon={Users} label="访问成员" value={activeMemberCount} hint="已启用且绑定有效账号的成员" tone="success" />
         <StatCard icon={ListChecks} label="本地渠道记录" value={channelRecordCount} hint="通过本工具导入的渠道" tone="info" />
       </div>
 
@@ -357,8 +278,6 @@ export default function AdminInstances({
                 <th>实例</th>
                 <th>状态</th>
                 <th>管理员</th>
-                <th>默认命名</th>
-                <th>优先级 / 权重</th>
                 <th>访问成员</th>
                 <th className="align-right">记录</th>
                 <th className="align-right">操作</th>
@@ -377,8 +296,6 @@ export default function AdminInstances({
                     <StatusText status={instance.enabled ? "enabled" : "disabled"} />
                   </td>
                   <td>{instance.adminUsername}</td>
-                  <td><span className="cell-mono">{formatChannelNamePattern(instance)}</span></td>
-                  <td>{instance.priority} / {instance.weight}</td>
                   <td>
                     <button
                       className="btn btn-ghost btn-sm member-count-button"
@@ -388,7 +305,7 @@ export default function AdminInstances({
                     >
                       <Users size={14} aria-hidden="true" />
                       {instance.memberCount === 0
-                        ? "添加成员"
+                        ? "管理访问成员"
                         : instance.activeMemberCount === instance.memberCount
                           ? `${instance.memberCount} 人`
                           : `${instance.activeMemberCount} / ${instance.memberCount} 人`}
@@ -452,8 +369,8 @@ export default function AdminInstances({
         open={isSheetOpen}
         title={sheetInstance ? "编辑实例" : "新增实例"}
         description={sheetInstance
-          ? `修改 ${sheetInstance.name} 的本地连接配置和渠道默认值。`
-          : "填写 New API 管理员账号，系统将用它创建渠道。"}
+          ? `修改 ${sheetInstance.name} 的连接信息或启停状态。`
+          : "填写 New API 连接信息；渠道类型、Key、模型和分组稍后在新建渠道流程中选择。"}
         onClose={closeSheet}
         closeDisabled={isSubmitting}
         closeOnBackdrop={false}
@@ -488,7 +405,7 @@ export default function AdminInstances({
         onCancel={() => setDeletingInstance(null)}
       >
         <p>
-          将删除本系统中的实例“{deletingInstance?.name}”、{deletingInstance?.memberCount} 个访问成员、访客会话和
+          将删除本系统中的实例“{deletingInstance?.name}”、{deletingInstance?.memberCount} 个访问成员及其账号绑定，以及
           {" "}{deletingInstance?.channelRecordCount} 条本地渠道历史。
         </p>
         <p className="callout callout-warning">

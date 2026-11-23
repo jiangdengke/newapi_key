@@ -18,11 +18,12 @@ export async function POST(request, { params }) {
   const { instanceId } = await params;
   try {
     requireSameOrigin(request);
-    const { instance, principal } = requireInstanceAccess(request, instanceId);
+    requireInstanceAccess(request, instanceId);
+    const requestBody = await readJsonBody(request);
+    const { instance, member } = requireInstanceAccess(request, instanceId);
     if (!instance.enabled) {
       throw new HttpError(409, "该 New API 实例已停用");
     }
-    const requestBody = await readJsonBody(request);
     const channelImport = prepareChannelImport(
       instanceId,
       requestBody?.keys,
@@ -31,7 +32,7 @@ export async function POST(request, { params }) {
       requestBody?.group,
       requestBody?.models,
       requestBody?.awsApiType,
-      principal.kind === "visitor" ? principal.memberId : null,
+      member?.id ?? null,
     );
     const eventIterator = channelImport.events();
     const textEncoder = new TextEncoder();
